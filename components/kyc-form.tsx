@@ -12,6 +12,9 @@ import AddressSection from "./kyc-sections/address"
 import FinancialSection from "./kyc-sections/financial"
 import SecuritySection from "./kyc-sections/security"
 import DocumentUploadSection from "./kyc-sections/document-upload"
+import { useRouter } from "next/navigation"
+import ConfirmDetailsModal from "./confirm-details-modal"
+import RedirectOverlay from "./redirect-overlay"
 
 interface FormData {
   // Personal Info
@@ -72,6 +75,9 @@ export default function KYCForm() {
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [submitSuccess, setSubmitSuccess] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
+  const [showConfirm, setShowConfirm] = useState(false)
+  const [showRedirect, setShowRedirect] = useState(false)
+  const router = useRouter()
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value, type } = e.target as HTMLInputElement
@@ -159,68 +165,50 @@ export default function KYCForm() {
     setCurrentStep((prev) => Math.max(prev - 1, 1))
   }
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (validateCurrentStep()) {
-      setIsSubmitting(true)
-      setSubmitError(null)
+      setShowConfirm(true)
+    }
+  }
 
-      try {
-        const netlifyFormData = new FormData()
-        netlifyFormData.append("form-name", "kyc-verification")
+  const submitToNetlify = async () => {
+    setIsSubmitting(true)
+    setSubmitError(null)
+    setShowConfirm(false)
+    setShowRedirect(true)
+    try {
+      const netlifyFormData = new FormData()
+      netlifyFormData.append("form-name", "kyc-verification")
 
-        Object.entries(formData).forEach(([key, value]) => {
-          if (key === "documents") {
-            formData.documents.forEach((file, index) => {
-              netlifyFormData.append(`document-${index + 1}`, file)
-            })
-          } else if (typeof value === "boolean") {
-            netlifyFormData.append(key, value ? "yes" : "no")
-          } else {
-            netlifyFormData.append(key, String(value))
-          }
-        })
-
-        const response = await fetch("/", {
-          method: "POST",
-          body: netlifyFormData,
-        })
-
-        if (!response.ok) {
-          throw new Error("Form submission failed")
-        }
-
-        setSubmitSuccess(true)
-        setIsSubmitting(false)
-
-        setTimeout(() => {
-          setCurrentStep(1)
-          setFormData({
-            firstName: "",
-            lastName: "",
-            dateOfBirth: "",
-            nationality: "",
-            email: "",
-            phone: "",
-            street: "",
-            city: "",
-            postalCode: "",
-            country: "",
-            iban: "",
-            accountHolderName: "",
-            sourceOfFunds: "",
-            password: "",
-            confirmPassword: "",
-            acceptTerms: false,
-            documents: [],
+      Object.entries(formData).forEach(([key, value]) => {
+        if (key === "documents") {
+          formData.documents.forEach((file, index) => {
+            netlifyFormData.append(`document-${index + 1}`, file)
           })
-          setSubmitSuccess(false)
-        }, 5000)
-      } catch (error) {
-        console.error("Submission error:", error)
-        setSubmitError("Es ist ein Fehler aufgetreten. Bitte versuchen Sie es erneut.")
-        setIsSubmitting(false)
+        } else if (typeof value === "boolean") {
+          netlifyFormData.append(key, value ? "yes" : "no")
+        } else {
+          netlifyFormData.append(key, String(value))
+        }
+      })
+
+      const response = await fetch("/", {
+        method: "POST",
+        body: netlifyFormData,
+      })
+
+      if (!response.ok) {
+        throw new Error("Form submission failed")
       }
+
+      router.push("/success")
+    } catch (error) {
+      console.error("Submission error:", error)
+      setSubmitError("Es ist ein Fehler aufgetreten. Bitte versuchen Sie es erneut.")
+      setShowRedirect(false)
+    } finally {
+      setIsSubmitting(false)
     }
   }
 
@@ -375,6 +363,13 @@ export default function KYCForm() {
             </div>
           </CardContent>
         </Card>
+        <ConfirmDetailsModal
+          open={showConfirm}
+          onCancel={() => setShowConfirm(false)}
+          onConfirm={submitToNetlify}
+          formData={formData}
+        />
+        <RedirectOverlay show={showRedirect} message="Weiterleitung zur Erfolgsseite..." />
       </div>
     </div>
   )

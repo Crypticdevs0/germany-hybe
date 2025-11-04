@@ -10,7 +10,36 @@ const _geistMono = Geist_Mono({ subsets: ["latin"] })
 export const metadata: Metadata = {
   title: "HYBE CORP - KYC Verifizierung",
   description: "Sichere Identitätsverifizierung für HYBE CORP. DSGVO-konform und verschlüsselt.",
+  applicationName: "HYBE CORP",
   generator: "v0.app",
+  keywords: ["HYBE CORP", "KYC", "Identitätsprüfung", "Verifizierung", "DSGVO"],
+  authors: [{ name: "HYBE CORP" }],
+  category: "finance",
+  openGraph: {
+    type: "website",
+    url: "/",
+    title: "HYBE CORP - KYC Verifizierung",
+    siteName: "HYBE CORP",
+    description: "Sichere Identitätsverifizierung für HYBE CORP.",
+    locale: "de_DE",
+    images: [
+      {
+        url: "/placeholder-logo.svg",
+        width: 1200,
+        height: 630,
+        alt: "HYBE CORP",
+      },
+    ],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "HYBE CORP - KYC Verifizierung",
+    description: "Sichere Identitätsverifizierung für HYBE CORP.",
+    images: ["/placeholder-logo.svg"],
+  },
+  icons: {
+    icon: "/placeholder-logo.svg",
+  },
 }
 
 export default function RootLayout({

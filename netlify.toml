@@ -1,0 +1,13 @@
+[build]
+  command = "pnpm build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "20"
+  NEXT_TELEMETRY_DISABLED = "1"
+
+# Use the default Netlify Next.js Runtime (auto-detected). No plugin block required.
+
+# Functions config (kept minimal; Next Runtime handles routing/SSR)
+[functions]
+  node_bundler = "esbuild"

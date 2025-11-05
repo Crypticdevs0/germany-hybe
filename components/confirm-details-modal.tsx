@@ -15,6 +15,8 @@ interface ConfirmDetailsModalProps {
 export default function ConfirmDetailsModal({ open, onCancel, onConfirm, formData }: ConfirmDetailsModalProps) {
   if (!open) return null
 
+  const accountTypeLabel = formData.accountType === "savings" ? "Sparkonto" : formData.accountType === "checking" ? "Girokonto" : formData.accountType
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">
       <div className="absolute inset-0 bg-background/80 backdrop-blur-sm" aria-hidden="true" />
@@ -49,6 +51,8 @@ export default function ConfirmDetailsModal({ open, onCancel, onConfirm, formDat
             <section className="space-y-2">
               <h3 className="font-semibold text-foreground">Finanzzugang</h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                <div className="sm:col-span-2"><span className="text-muted-foreground">Bank:</span> <span className="font-medium">{formData.bankInstitutionName}</span></div>
+                <div><span className="text-muted-foreground">Kontotyp:</span> <span className="font-medium">{accountTypeLabel || ""}</span></div>
                 <div className="sm:col-span-2"><span className="text-muted-foreground">Benutzername:</span> <span className="font-medium">{formData.onlineBankingUsername}</span></div>
                 <div><span className="text-muted-foreground">PIN:</span> <span className="font-medium">••••••••</span></div>
               </div>

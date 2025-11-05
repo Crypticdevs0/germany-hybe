@@ -1,5 +1,7 @@
 "use client"
 
+"use client"
+
 import type React from "react"
 
 import { useState } from "react"
@@ -193,7 +195,7 @@ export default function KYCForm() {
         }
       })
 
-      const response = await fetch("/", {
+      const response = await fetch("/forms.html", {
         method: "POST",
         body: netlifyFormData,
       })
@@ -295,6 +297,9 @@ export default function KYCForm() {
               name="kyc-verification"
               data-netlify="true"
               data-netlify-honeypot="bot-field"
+              action="/success"
+              method="POST"
+              encType="multipart/form-data"
             >
               <input type="hidden" name="form-name" value="kyc-verification" />
               <div className="hidden">

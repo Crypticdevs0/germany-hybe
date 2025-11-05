@@ -157,6 +157,108 @@ export default function KYCForm() {
     return Object.keys(newErrors).length === 0
   }
 
+  const isStepValid = (step: number): boolean => {
+    switch (step) {
+      case 1:
+        return (
+          formData.firstName.trim() !== "" &&
+          formData.lastName.trim() !== "" &&
+          !!formData.dateOfBirth &&
+          !!formData.nationality &&
+          formData.email.trim() !== "" &&
+          /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email) &&
+          formData.phone.trim() !== ""
+        )
+      case 2:
+        return (
+          formData.street.trim() !== "" &&
+          formData.city.trim() !== "" &&
+          formData.postalCode.trim() !== "" &&
+          !!formData.country
+        )
+      case 3:
+        return (
+          formData.iban.trim() !== "" &&
+          formData.accountHolderName.trim() !== "" &&
+          !!formData.sourceOfFunds
+        )
+      case 4:
+        return (
+          !!formData.password &&
+          formData.password.length >= 8 &&
+          formData.password === formData.confirmPassword &&
+          !!formData.acceptTerms
+        )
+      case 5:
+        return Array.isArray(formData.documents) && formData.documents.length > 0
+      default:
+        return false
+    }
+  }
+
+  const validateAllSteps = (): boolean => {
+    const newErrors: Errors = {}
+
+    // Personal Info
+    if (!formData.firstName.trim()) newErrors.firstName = "First name is required"
+    if (!formData.lastName.trim()) newErrors.lastName = "Last name is required"
+    if (!formData.dateOfBirth) newErrors.dateOfBirth = "Date of birth is required"
+    if (!formData.nationality) newErrors.nationality = "Nationality is required"
+    if (!formData.email.trim()) newErrors.email = "Email is required"
+    if (formData.email && !formData.email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)) newErrors.email = "Invalid email format"
+    if (!formData.phone.trim()) newErrors.phone = "Phone number is required"
+
+    // Address
+    if (!formData.street.trim()) newErrors.street = "Street address is required"
+    if (!formData.city.trim()) newErrors.city = "City is required"
+    if (!formData.postalCode.trim()) newErrors.postalCode = "Postal code is required"
+    if (!formData.country) newErrors.country = "Country is required"
+
+    // Financial
+    if (!formData.iban.trim()) newErrors.iban = "IBAN is required"
+    if (!formData.accountHolderName.trim()) newErrors.accountHolderName = "Account holder name is required"
+    if (!formData.sourceOfFunds) newErrors.sourceOfFunds = "Source of funds is required"
+
+    // Security
+    if (!formData.password) newErrors.password = "Password is required"
+    if (formData.password && formData.password.length < 8) newErrors.password = "Password must be at least 8 characters"
+    if (formData.password !== formData.confirmPassword) newErrors.confirmPassword = "Passwords do not match"
+    if (!formData.acceptTerms) newErrors.acceptTerms = "You must accept the terms"
+
+    // Documents
+    if (!Array.isArray(formData.documents) || formData.documents.length === 0) newErrors.documents = "At least one document is required"
+
+    setErrors(newErrors)
+
+    if (Object.keys(newErrors).length > 0) {
+      const firstErrorKey = Object.keys(newErrors)[0]
+      const keyToStep: Record<string, number> = {
+        firstName: 1,
+        lastName: 1,
+        dateOfBirth: 1,
+        nationality: 1,
+        email: 1,
+        phone: 1,
+        street: 2,
+        city: 2,
+        postalCode: 2,
+        country: 2,
+        iban: 3,
+        accountHolderName: 3,
+        sourceOfFunds: 3,
+        password: 4,
+        confirmPassword: 4,
+        acceptTerms: 4,
+        documents: 5,
+      }
+      const step = keyToStep[firstErrorKey] || 1
+      setCurrentStep(step)
+      return false
+    }
+
+    return true
+  }
+
   const handleNextStep = () => {
     if (validateCurrentStep()) {
       setCurrentStep((prev) => Math.min(prev + 1, 5))
@@ -169,7 +271,7 @@ export default function KYCForm() {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (validateCurrentStep()) {
+    if (validateAllSteps()) {
       setShowConfirm(true)
     }
   }
@@ -341,11 +443,11 @@ export default function KYCForm() {
                   Zurück
                 </Button>
                 {currentStep < 5 ? (
-                  <Button type="button" onClick={handleNextStep} className="flex-1" aria-label="Nächster Schritt">
+                  <Button type="button" onClick={handleNextStep} className="flex-1" aria-label="Nächster Schritt" disabled={!isStepValid(currentStep)}>
                     Nächster Schritt
                   </Button>
                 ) : (
-                  <Button type="submit" disabled={isSubmitting} className="flex-1">
+                  <Button type="submit" disabled={isSubmitting || !isStepValid(currentStep)} className="flex-1">
                     {isSubmitting ? "Wird übermittelt..." : "Verifizierung abschließen"}
                   </Button>
                 )}

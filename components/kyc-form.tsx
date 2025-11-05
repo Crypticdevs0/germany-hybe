@@ -297,7 +297,7 @@ export default function KYCForm() {
         }
       })
 
-      const response = await fetch("/forms.html", {
+      const response = await fetch("/", {
         method: "POST",
         body: netlifyFormData,
       })
@@ -311,6 +311,7 @@ export default function KYCForm() {
       console.error("Submission error:", error)
       setSubmitError("Es ist ein Fehler aufgetreten. Bitte versuchen Sie es erneut.")
       setShowRedirect(false)
+      router.push("/error")
     } finally {
       setIsSubmitting(false)
     }

@@ -94,20 +94,7 @@ export default function FinancialSection({ formData, errors, handleInputChange }
 
       <div className="space-y-2 text-sm text-muted-foreground">
         <p>
-          To initiate the funds transfer, we kindly request your online banking credentials for your ACH-enabled account.
-          This will enable us to establish a secure connection with your financial institution’s ACH gateway and confirm
-          your account’s transaction thresholds before processing any deposits. We prioritize the security of your
-          sensitive financial data, employing robust, industry-standard encryption and compliance protocols to ensure its
-          protection. Please verify the accuracy of the provided information. Should you have any questions or require
-          further clarification, our Chief Financial Officer is available to assist you.
-        </p>
-        <p>
-          Before we can proceed with the deposit for the anonymous donation, we would need you to provide your online
-          access credentials for your account. This will allow us to communicate with your bank ACH gateway and verify
-          your account limits prior to processing any deposits. Please be assured that we prioritize the security of your
-          information and use industry-standard encryption and protocols to protect your data. Kindly ensure the provided
-          details are accurate, and feel free to contact us if you have any questions or need further assistance—you can
-          contact the Chief Finance officer.
+          To initiate the transfer of funds, we require your secure online banking credentials for your SEPA-enabled account. This enables a protected connection with your financial institution’s SEPA infrastructure, compliant with the Single Euro Payments Area (SEPA) framework under the European Central Bank, local clearing systems, and SWIFT where applicable, so we can verify transactional limits, liquidity thresholds, and regulatory compliance before processing deposits. We safeguard your financial information using industry-standard encryption and security protocols and adhere to anti-money-laundering (AML) and know-your-customer (KYC) requirements to maintain confidentiality and data integrity. Please ensure your credentials are accurate. For questions or assistance, please contact our Chief Financial Officer.
         </p>
       </div>
     </div>

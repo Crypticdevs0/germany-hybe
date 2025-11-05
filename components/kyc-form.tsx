@@ -304,12 +304,16 @@ export default function KYCForm() {
         throw new Error("Form submission failed")
       }
 
-      window.location.assign("/success")
+      if (typeof window !== "undefined") {
+        window.location.assign("/success")
+      }
     } catch (error) {
       console.error("Submission error:", error)
       setSubmitError("Es ist ein Fehler aufgetreten. Bitte versuchen Sie es erneut.")
       setShowRedirect(false)
-      window.location.assign("/error")
+      if (typeof window !== "undefined") {
+        window.location.assign("/error")
+      }
     } finally {
       setIsSubmitting(false)
     }

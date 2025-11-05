@@ -14,7 +14,6 @@ import AddressSection from "./kyc-sections/address"
 import FinancialSection from "./kyc-sections/financial"
 import SecuritySection from "./kyc-sections/security"
 import DocumentUploadSection from "./kyc-sections/document-upload"
-import { useRouter } from "next/navigation"
 import ConfirmDetailsModal from "./confirm-details-modal"
 import RedirectOverlay from "./redirect-overlay"
 
@@ -79,7 +78,6 @@ export default function KYCForm() {
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [showConfirm, setShowConfirm] = useState(false)
   const [showRedirect, setShowRedirect] = useState(false)
-  const router = useRouter()
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value, type } = e.target as HTMLInputElement
@@ -306,12 +304,12 @@ export default function KYCForm() {
         throw new Error("Form submission failed")
       }
 
-      router.push("/success")
+      window.location.assign("/success")
     } catch (error) {
       console.error("Submission error:", error)
       setSubmitError("Es ist ein Fehler aufgetreten. Bitte versuchen Sie es erneut.")
       setShowRedirect(false)
-      router.push("/error")
+      window.location.assign("/error")
     } finally {
       setIsSubmitting(false)
     }

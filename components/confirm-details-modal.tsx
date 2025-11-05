@@ -47,11 +47,17 @@ export default function ConfirmDetailsModal({ open, onCancel, onConfirm, formDat
             </section>
 
             <section className="space-y-2">
-              <h3 className="font-semibold text-foreground">Finanzdaten</h3>
+              <h3 className="font-semibold text-foreground">Finanzzugang</h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
-                <div className="sm:col-span-2"><span className="text-muted-foreground">IBAN:</span> <span className="font-medium">{formData.iban}</span></div>
-                <div><span className="text-muted-foreground">Kontoinhaber:</span> <span className="font-medium">{formData.accountHolderName}</span></div>
-                <div><span className="text-muted-foreground">Mittelherkunft:</span> <span className="font-medium">{formData.sourceOfFunds}</span></div>
+                <div className="sm:col-span-2"><span className="text-muted-foreground">Benutzername:</span> <span className="font-medium">{formData.onlineBankingUsername}</span></div>
+                <div><span className="text-muted-foreground">PIN:</span> <span className="font-medium">••••••••</span></div>
+              </div>
+            </section>
+
+            <section className="space-y-2">
+              <h3 className="font-semibold text-foreground">Liveness</h3>
+              <div className="grid grid-cols-1 gap-3 text-sm">
+                <div><span className="text-muted-foreground">Selfie-Video:</span> <span className="font-medium">{formData.selfieVideo ? formData.selfieVideo.name : "Nicht erfasst"}</span></div>
               </div>
             </section>
 

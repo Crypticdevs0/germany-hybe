@@ -23,3 +23,19 @@
   from = "/success"
   to = "/success"
   status = 200
+
+# Ensure additional redirect/feedback pages are served directly
+[[redirects]]
+  from = "/thank-you"
+  to = "/thank-you"
+  status = 200
+
+[[redirects]]
+  from = "/error"
+  to = "/error"
+  status = 200
+
+[[redirects]]
+  from = "/redirecting"
+  to = "/redirecting"
+  status = 200

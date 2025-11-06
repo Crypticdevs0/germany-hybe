@@ -1,6 +1,6 @@
 "use client"
 
-import React, { useEffect, useRef, useReducer, useState } from "react"
+import React, { useEffect, useRef, useState } from "react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
@@ -12,107 +12,37 @@ interface LivenessCheckSectionProps {
   onCapture: (file: File | null) => void
 }
 
-type Indicators = {
-  left: boolean
-  right: boolean
-  nod: boolean
-}
-
-type State = {
-  modelsLoaded: boolean
-  modelsLoading: boolean
-  faceApiReady: boolean
-  faceApiError: string | null
-  indicators: Indicators
-  isRecording: boolean
-  remainingSec: number
-  motionMessage: string | null
-}
-
-type Action =
-  | { type: "models/loading" }
-  | { type: "models/loaded" }
-  | { type: "models/error"; payload: string }
-  | { type: "faceapi/ready" }
-  | { type: "indicator/update"; payload: Partial<Indicators> }
-  | { type: "recording/start" }
-  | { type: "recording/stop" }
-  | { type: "timer/tick"; payload: number }
-  | { type: "motion/message"; payload: string | null }
-
-const INITIAL_STATE: State = {
-  modelsLoaded: false,
-  modelsLoading: false,
-  faceApiReady: false,
-  faceApiError: null,
-  indicators: { left: false, right: false, nod: false },
-  isRecording: false,
-  remainingSec: 5,
-  motionMessage: null,
-}
-
-function reducer(state: State, action: Action): State {
-  switch (action.type) {
-    case "models/loading":
-      return { ...state, modelsLoading: true, faceApiError: null }
-    case "models/loaded":
-      return { ...state, modelsLoading: false, modelsLoaded: true, faceApiError: null }
-    case "models/error":
-      return { ...state, modelsLoading: false, modelsLoaded: false, faceApiError: action.payload }
-    case "faceapi/ready":
-      return { ...state, faceApiReady: true }
-    case "indicator/update":
-      return { ...state, indicators: { ...state.indicators, ...action.payload } }
-    case "recording/start":
-      return { ...state, isRecording: true }
-    case "recording/stop":
-      return { ...state, isRecording: false }
-    case "timer/tick":
-      return { ...state, remainingSec: action.payload }
-    case "motion/message":
-      return { ...state, motionMessage: action.payload }
-    default:
-      return state
-  }
-}
-
+// Modern liveness using TensorFlow face-landmarks-detection (MediaPipe FaceMesh runtime)
 export default function LivenessCheckSection({ selfieVideo, error, onCapture }: LivenessCheckSectionProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
-  const startButtonRef = useRef<HTMLButtonElement | null>(null)
   const mediaStreamRef = useRef<MediaStream | null>(null)
   const recorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
-  const timerRef = useRef<number | null>(null)
-  const autoSaveTimerRef = useRef<number | null>(null)
-
-  const faceapiRef = useRef<any | null>(null)
-  const analyzingRef = useRef<boolean>(false)
-  const lastAnalyzeRef = useRef<number>(0)
-  const baselineRef = useRef<{ noseY: number; eyeCenterY: number } | null>(null)
-  const blinkStateRef = useRef<{ lastEAR: number; blinked: boolean }>({ lastEAR: 1, blinked: false })
-  const selectedMimeRef = useRef<string | undefined>(undefined)
+  const detectorRef = useRef<any | null>(null)
+  const analyzingRef = useRef(false)
+  const lastAnalyzeRef = useRef(0)
 
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [capturedFile, setCapturedFile] = useState<File | null>(null)
-  const [confirmed, setConfirmed] = useState<boolean>(false)
-  const [acceptedInstructions, setAcceptedInstructions] = useState<boolean>(false)
-  const [autoSaveCountdown, setAutoSaveCountdown] = useState<number | null>(null)
-  const [recorderSupported, setRecorderSupported] = useState<boolean>(true)
+  const [confirmed, setConfirmed] = useState(false)
+  const [acceptedInstructions, setAcceptedInstructions] = useState(false)
 
-  const [state, dispatch] = useReducer(reducer, INITIAL_STATE)
+  const [modelsLoading, setModelsLoading] = useState(false)
+  const [modelsLoaded, setModelsLoaded] = useState(false)
+  const [motionMessage, setMotionMessage] = useState<string | null>(null)
+  const [isRecording, setIsRecording] = useState(false)
+  const [remaining, setRemaining] = useState<number>(5)
+  const [recorderSupported, setRecorderSupported] = useState(true)
+
+  const INDICATOR = useRef({ left: false, right: false, nod: false })
 
   const MAX_DURATION_SEC = 5
-  const AUTO_SAVE_DELAY_SEC = 3
-  const ANALYZE_INTERVAL_MS = 150 // throttle analysis to every 150ms
+  const ANALYZE_INTERVAL_MS = 120
 
   useEffect(() => {
-    // pre-emptively attempt to load face-api library in background
-    (async () => {
-      await ensureFaceApi()
-    })()
-    return () => {
-      cleanupAll()
-    }
+    // preload detector in background
+    (async () => await ensureDetector())()
+    return () => cleanup()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -126,162 +56,71 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selfieVideo])
 
-  useEffect(() => {
-    if (acceptedInstructions && capturedFile && !confirmed) {
-      setAutoSaveCountdown(AUTO_SAVE_DELAY_SEC)
-      let left = AUTO_SAVE_DELAY_SEC
-      autoSaveTimerRef.current = window.setInterval(() => {
-        left -= 1
-        setAutoSaveCountdown(left > 0 ? left : 0)
-        if (left <= 0) {
-          confirmAndSave()
-          if (autoSaveTimerRef.current) {
-            window.clearInterval(autoSaveTimerRef.current)
-            autoSaveTimerRef.current = null
-          }
-        }
-      }, 1000)
-    } else {
-      if (autoSaveTimerRef.current) {
-        window.clearInterval(autoSaveTimerRef.current)
-        autoSaveTimerRef.current = null
-      }
-      setAutoSaveCountdown(null)
-    }
-    return () => {
-      if (autoSaveTimerRef.current) {
-        window.clearInterval(autoSaveTimerRef.current)
-        autoSaveTimerRef.current = null
-      }
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [acceptedInstructions, capturedFile, confirmed])
-
-  const ensureFaceApi = async () => {
-    if (faceapiRef.current) return
+  const ensureDetector = async () => {
+    if (detectorRef.current) return
     try {
-      const faceapi = await import("face-api.js")
-      faceapiRef.current = faceapi
-      // try to set tf backend for better perf when available
+      setModelsLoading(true)
+      // load tfjs webgl backend and the face-landmarks-detection model dynamically
+      const tfBackend = await import("@tensorflow/tfjs-backend-webgl")
+      const facemesh = await import("@tensorflow-models/face-landmarks-detection")
+      // set backend
+      if (tfBackend && tfBackend.setWebGLContext) {
+        // some builds export differently; try standard ready
+      }
+      const tf = await import("@tensorflow/tfjs-core")
       try {
-        if (faceapi && faceapi.tf && faceapi.tf.setBackend) {
-          // prefer webgl, fallback to cpu
-          await faceapi.tf.setBackend("webgl").catch(() => faceapi.tf.setBackend("cpu"))
-        }
+        await (tf as any).setBackend?.("webgl")
+        await (tf as any).ready()
       } catch {
-        // ignore backend selection errors
+        // fallback: continue even if backend set fails
       }
-      dispatch({ type: "faceapi/ready" })
+
+      // create detector using MediaPipe FaceMesh (fast and accurate)
+      const detector = await (facemesh as any).createDetector((facemesh as any).SupportedModels.MediaPipeFaceMesh, {
+        runtime: "tfjs",
+        maxFaces: 1,
+        refineLandmarks: true,
+      })
+      detectorRef.current = detector
+      setModelsLoaded(true)
+      setModelsLoading(false)
     } catch (e: any) {
-      dispatch({ type: "models/error", payload: `face-api konnte nicht geladen werden: ${e?.message || String(e)}` })
+      console.error("liveness: failed to load detector", e)
+      setModelsLoading(false)
+      setMotionMessage("Modelle konnten nicht geladen werden. Bitte prüfen Sie Ihre Verbindung.")
     }
-  }
-
-  const loadModels = async (retries = 2) => {
-    if (!faceapiRef.current) await ensureFaceApi()
-    const faceapi = faceapiRef.current
-    if (!faceapi) return
-    if (state.modelsLoaded) return
-
-    dispatch({ type: "models/loading" })
-
-    const LOCAL_MODEL_URL = "/face-api/models"
-    // Prefer the official GitHub Pages mirror, jsDelivr path may 404 for some versions
-    const FALLBACK_URLS = [
-      "https://justadudewhohacks.github.io/face-api.js/models",
-      // additional mirrors commonly used
-      "https://unpkg.com/face-api.js@0.22.2/weights",
-      "https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@0.22.2/weights",
-      "https://cdn.jsdelivr.net/npm/face-api.js/models",
-    ]
-
-    const tryLoad = async (url: string) => {
-      await Promise.all([
-        faceapi.nets.tinyFaceDetector.loadFromUri(url),
-        faceapi.nets.faceLandmark68Net.loadFromUri(url),
-        faceapi.nets.faceExpressionNet.loadFromUri(url),
-      ])
-    }
-
-    let lastErr: any = null
-    const sources = [LOCAL_MODEL_URL, ...FALLBACK_URLS]
-    for (let i = 0; i < sources.length && (i === 0 || i - 1 < retries); i++) {
-      const src = sources[i]
-      try {
-        await tryLoad(src)
-        dispatch({ type: "models/loaded" })
-        // focus start button for accessibility
-        setTimeout(() => startButtonRef.current?.focus(), 50)
-        return
-      } catch (err) {
-        lastErr = err
-        // exponential backoff between attempts
-        await new Promise((r) => setTimeout(r, 300 * (i + 1)))
-      }
-    }
-
-    dispatch({ type: "models/error", payload: `Modelle konnten nicht geladen werden: ${lastErr?.message || String(lastErr)}. Bitte prüfen Sie /face-api/models oder Netzwerkzugriff.` })
-  }
-
-  const chooseMimeType = (): string | undefined => {
-    const candidates = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm", "video/mp4"]
-    for (const type of candidates) {
-      if (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(type)) return type
-    }
-    return undefined
   }
 
   const startStream = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
-        audio: true,
-      })
-      mediaStreamRef.current = stream
+      const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: 640, height: 480 }, audio: true })
+      mediaStreamRef.current = s
       if (videoRef.current) {
-        videoRef.current.srcObject = stream
+        videoRef.current.srcObject = s
         await videoRef.current.play()
-        videoRef.current.setAttribute("aria-live", "polite")
-        videoRef.current.setAttribute("aria-label", "Live-Kamera Vorschau")
       }
-      // load models after camera access for better UX
-      await loadModels()
-    } catch (err: any) {
-      dispatch({ type: "models/error", payload: "Keine Kamera erkannt oder Zugriff verweigert." })
+      // ensure detector is ready
+      await ensureDetector()
+    } catch (e: any) {
+      console.error("liveness: startStream", e)
+      setMotionMessage("Kamera nicht verfügbar oder Zugriff verweigert.")
     }
   }
 
   const stopStream = () => {
     mediaStreamRef.current?.getTracks().forEach((t) => t.stop())
     mediaStreamRef.current = null
-    if (videoRef.current) {
-      videoRef.current.srcObject = null
-    }
+    if (videoRef.current) videoRef.current.srcObject = null
+    stopAnalysis()
   }
 
-  const computeEAR = (pts: { x: number; y: number }[]) => {
-    const dist = (a: any, b: any) => Math.hypot(a.x - b.x, a.y - b.y)
-    const ear = (dist(pts[1], pts[5]) + dist(pts[2], pts[4])) / (2 * dist(pts[0], pts[3]))
-    return ear
-  }
-
-  const startFaceApiAnalysis = () => {
-    if (!faceapiRef.current || !state.modelsLoaded) return
-    stopFaceApiAnalysis()
-
-    // reset
-    baselineRef.current = null
-    blinkStateRef.current = { lastEAR: 1, blinked: false }
-    dispatch({ type: "indicator/update", payload: { left: false, right: false, nod: false } })
-
+  const startAnalysis = () => {
+    if (!detectorRef.current || !videoRef.current) return
+    INDICATOR.current = { left: false, right: false, nod: false }
     analyzingRef.current = true
-    const faceapi = faceapiRef.current
-
-    const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 160, scoreThreshold: 0.5 })
 
     const analyze = async () => {
       if (!analyzingRef.current) return
-
       const now = performance.now()
       if (now - lastAnalyzeRef.current < ANALYZE_INTERVAL_MS) {
         requestAnimationFrame(analyze)
@@ -289,127 +128,79 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
       }
       lastAnalyzeRef.current = now
 
-      const v = videoRef.current
-      if (!v || v.readyState < 2) {
-        requestAnimationFrame(analyze)
-        return
-      }
-
       try {
-        // wrap in tf.tidy if available to reduce memory growth
-        if (faceapi.tf && faceapi.tf.tidy) {
-          await faceapi.tf.tidy(async () => {
-            const result = await faceapi.detectSingleFace(v, options).withFaceLandmarks()
-            handleResult(result)
-          })
-        } else {
-          const result = await faceapi.detectSingleFace(v, options).withFaceLandmarks()
-          handleResult(result)
+        const faces = await detectorRef.current.estimateFaces(videoRef.current, { flipHorizontal: true })
+        if (!faces || faces.length === 0) {
+          setMotionMessage("Gesicht nicht erkannt. Bitte halten Sie Ihr Gesicht vor die Kamera.")
+          requestAnimationFrame(analyze)
+          return
         }
-      } catch (err) {
-        // cheap error reporting to state
-        dispatch({ type: "motion/message", payload: "Fehler bei der Analyse des Videoframes." })
+
+        const f = faces[0]
+        // try to choose a nose-like keypoint
+        const kp = (f.keypoints || []).find((k: any) => k.name && k.name.toLowerCase().includes("nose")) || f.keypoints?.[1]
+        const bbox = f.boundingBox || f.box || null
+        if (!kp || !bbox) {
+          requestAnimationFrame(analyze)
+          return
+        }
+
+        const faceCenterX = bbox.xMin + (bbox.xMax - bbox.xMin) / 2
+        const faceWidth = Math.max(1, bbox.xMax - bbox.xMin)
+        const yaw = (kp.x - faceCenterX) / faceWidth
+
+        // baseline for pitch: compare nose y to top/bottom
+        const faceCenterY = bbox.yMin + (bbox.yMax - bbox.yMin) / 2
+        const pitch = (kp.y - faceCenterY) / Math.max(1, bbox.yMax - bbox.yMin)
+
+        if (yaw < -0.12) INDICATOR.current.left = true
+        if (yaw > 0.12) INDICATOR.current.right = true
+        if (pitch > 0.18) INDICATOR.current.nod = true
+
+        const missing: string[] = []
+        if (!INDICATOR.current.left) missing.push("links schauen")
+        if (!INDICATOR.current.right) missing.push("rechts schauen")
+        if (!INDICATOR.current.nod) missing.push("nicken")
+
+        if (missing.length === 0) setMotionMessage(null)
+        else setMotionMessage(`Bitte noch: ${missing.join(", ")}`)
+      } catch (e: any) {
+        console.warn("liveness analyze error", e)
       }
 
       requestAnimationFrame(analyze)
     }
 
-    const handleResult = (result: any) => {
-      if (!result || !result.landmarks) return
-      const positions = result.landmarks.positions
-
-      const leftEyeIdx = [36, 37, 38, 39, 40, 41]
-      const rightEyeIdx = [42, 43, 44, 45, 46, 47]
-      const leftEye = leftEyeIdx.map((i) => positions[i])
-      const rightEye = rightEyeIdx.map((i) => positions[i])
-
-      const nose = positions[30]
-      const jawLeft = positions[3]
-      const jawRight = positions[13]
-
-      const faceCenterX = (jawLeft.x + jawRight.x) / 2
-      const yawNorm = (nose.x - faceCenterX) / (jawRight.x - jawLeft.x)
-
-      const eyeCenterY = (leftEye[0].y + rightEye[3].y) / 2
-
-      if (!baselineRef.current) {
-        baselineRef.current = { noseY: nose.y, eyeCenterY }
-        return
-      }
-
-      const base = baselineRef.current
-      const yaw = yawNorm
-      const pitch = (nose.y - base.noseY) / Math.max(1, Math.abs(base.eyeCenterY - base.noseY))
-
-      const updates: Partial<Indicators> = {}
-      if (yaw < -0.10) updates.left = true
-      if (yaw > 0.10) updates.right = true
-      if (pitch > 0.28) updates.nod = true
-
-      if (Object.keys(updates).length > 0) dispatch({ type: "indicator/update", payload: updates })
-
-      const leftEAR = computeEAR(leftEye)
-      const rightEAR = computeEAR(rightEye)
-      const ear = (leftEAR + rightEAR) / 2
-      const prev = blinkStateRef.current.lastEAR
-      if (prev > 0.24 && ear < 0.18) blinkStateRef.current.blinked = true
-      blinkStateRef.current.lastEAR = ear
-
-      // update motion message to guide the user
-      const { left, right, nod } = { ...state.indicators, ...updates }
-      const missing: string[] = []
-      if (!left) missing.push("links schauen")
-      if (!right) missing.push("rechts schauen")
-      if (!nod) missing.push("nicken")
-      if (missing.length === 0) {
-        dispatch({ type: "motion/message", payload: null })
-      } else {
-        dispatch({ type: "motion/message", payload: `Bitte noch: ${missing.join(", ")}` })
-      }
-    }
-
     requestAnimationFrame(analyze)
   }
 
-  const stopFaceApiAnalysis = () => {
+  const stopAnalysis = () => {
     analyzingRef.current = false
-    // attempt to release tf memory if available
-    try {
-      const tf = faceapiRef.current?.tf
-      if (tf && tf.engine && tf.engine().dispose) {
-        // not all tf versions expose this; try safe cleanup
-        // eslint-disable-next-line @typescript-eslint/no-empty-function
-        ;(tf as any).dispose?.()
-      }
-    } catch {
-      // ignore
-    }
+  }
+
+  const chooseMime = (): string | undefined => {
+    const candidates = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"]
+    for (const c of candidates) if ((typeof MediaRecorder !== "undefined") && MediaRecorder.isTypeSupported(c)) return c
+    return undefined
   }
 
   const evaluateMotion = (): { passed: boolean; message?: string } => {
-    const sawLeft = state.indicators.left
-    const sawRight = state.indicators.right
-    const sawNod = state.indicators.nod
-
-    if (sawLeft && sawRight && sawNod) return { passed: true }
-
+    const { left, right, nod } = INDICATOR.current
+    if (left && right && nod) return { passed: true }
     const missing: string[] = []
-    if (!sawLeft) missing.push("nach links schauen")
-    if (!sawRight) missing.push("nach rechts schauen")
-    if (!sawNod) missing.push("nicken")
-
+    if (!left) missing.push("nach links schauen")
+    if (!right) missing.push("nach rechts schauen")
+    if (!nod) missing.push("nicken")
     return { passed: false, message: `Bitte führen Sie folgende Aktionen aus: ${missing.join(", ")}.` }
   }
 
   const startRecording = async () => {
-    if (!mediaStreamRef.current) {
-      await startStream()
-    }
+    if (!mediaStreamRef.current) await startStream()
     const stream = mediaStreamRef.current
     if (!stream) return
 
-    if (!state.faceApiReady || !state.modelsLoaded) {
-      dispatch({ type: "models/error", payload: "Modelle werden noch geladen. Bitte warten Sie." })
+    if (!detectorRef.current || !modelsLoaded) {
+      setMotionMessage("Modelle werden noch geladen. Bitte warten.")
       return
     }
 
@@ -418,23 +209,21 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
       return
     }
 
+    const mime = chooseMime()
     chunksRef.current = []
-    const mimeType = chooseMimeType()
-    selectedMimeRef.current = mimeType
-
     try {
-      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream)
+      const recorder = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream)
       recorderRef.current = recorder
 
       recorder.ondataavailable = (e) => {
-        if (e.data && e.data.size > 0) chunksRef.current.push(e.data)
+        if (e.data && e.data.size) chunksRef.current.push(e.data)
       }
 
       recorder.onstop = async () => {
-        stopFaceApiAnalysis()
+        stopAnalysis()
         const evaluation = evaluateMotion()
         if (!evaluation.passed) {
-          dispatch({ type: "motion/message", payload: evaluation.message || "Bewegung nicht erkannt. Bitte erneut versuchen." })
+          setMotionMessage(evaluation.message || "Bewegung nicht erkannt. Bitte erneut versuchen.")
           chunksRef.current = []
           setCapturedFile(null)
           setPreviewUrl((p) => {
@@ -442,80 +231,58 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
             return null
           })
           await startStream()
-          setTimeout(() => dispatch({ type: "indicator/update", payload: { left: false, right: false, nod: false } }), 400)
-          dispatch({ type: "recording/stop" })
+          setTimeout(() => { INDICATOR.current = { left: false, right: false, nod: false } }, 400)
+          setIsRecording(false)
           return
         }
 
-        const mime = selectedMimeRef.current || ((recorderRef.current as any)?.mimeType as string) || "video/webm"
-        const ext = mime.includes("mp4") ? ".mp4" : mime.includes("webm") ? ".webm" : ".webm"
-        const blob = new Blob(chunksRef.current, { type: mime })
-        const file = new File([blob], `selfie-${Date.now()}${ext}`, { type: mime })
-
+        const blob = new Blob(chunksRef.current, { type: mime || "video/webm" })
+        const ext = (mime && mime.includes("mp4")) ? ".mp4" : ".webm"
+        const file = new File([blob], `selfie-${Date.now()}${ext}`, { type: mime || "video/webm" })
         setCapturedFile(file)
-        setPreviewUrl((prev) => {
-          if (prev) URL.revokeObjectURL(prev)
-          return URL.createObjectURL(file)
-        })
-        dispatch({ type: "recording/stop" })
+        setPreviewUrl((p) => { if (p) URL.revokeObjectURL(p); return URL.createObjectURL(file) })
+        setIsRecording(false)
         stopStream()
-        dispatch({ type: "motion/message", payload: null })
+        setMotionMessage(null)
       }
 
       recorder.start()
-      dispatch({ type: "recording/start" })
-      dispatch({ type: "motion/message", payload: null })
-      dispatch({ type: "indicator/update", payload: { left: false, right: false, nod: false } })
-
-      // start face analysis only if models are ready
-      if (state.faceApiReady && state.modelsLoaded) startFaceApiAnalysis()
+      setIsRecording(true)
+      setMotionMessage(null)
+      INDICATOR.current = { left: false, right: false, nod: false }
+      if (modelsLoaded) startAnalysis()
 
       let left = MAX_DURATION_SEC
-      dispatch({ type: "timer/tick", payload: left })
-      timerRef.current = window.setInterval(() => {
+      setRemaining(left)
+      const t = window.setInterval(() => {
         left -= 1
-        dispatch({ type: "timer/tick", payload: left })
+        setRemaining(left)
         if (left <= 0) {
-          if (recorderRef.current && recorderRef.current.state !== "inactive") {
-            recorderRef.current.stop()
-          }
-          if (timerRef.current) {
-            window.clearInterval(timerRef.current)
-            timerRef.current = null
-          }
+          if (recorderRef.current && recorderRef.current.state !== "inactive") recorderRef.current.stop()
+          window.clearInterval(t)
         }
       }, 1000)
     } catch (e: any) {
+      console.error("liveness startRecording", e)
       setRecorderSupported(false)
-      dispatch({ type: "models/error", payload: `Aufnahme konnte nicht gestartet werden: ${e?.message || String(e)}` })
+      setMotionMessage("Aufnahme konnte nicht gestartet werden.")
     }
   }
 
   const stopRecording = () => {
-    if (timerRef.current) {
-      window.clearInterval(timerRef.current)
-      timerRef.current = null
-    }
-    if (recorderRef.current && recorderRef.current.state !== "inactive") {
-      recorderRef.current.stop()
-    }
-    dispatch({ type: "recording/stop" })
-    stopFaceApiAnalysis()
+    if (recorderRef.current && recorderRef.current.state !== "inactive") recorderRef.current.stop()
+    setIsRecording(false)
+    stopAnalysis()
   }
 
   const retake = () => {
-    setPreviewUrl((p) => {
-      if (p) URL.revokeObjectURL(p)
-      return null
-    })
+    setPreviewUrl((p) => { if (p) URL.revokeObjectURL(p); return null })
     setCapturedFile(null)
     setConfirmed(false)
     setAcceptedInstructions(false)
-    setAutoSaveCountdown(null)
-    dispatch({ type: "indicator/update", payload: { left: false, right: false, nod: false } })
-    dispatch({ type: "motion/message", payload: null })
-    stopFaceApiAnalysis()
-    // restart stream so user can try again
+    INDICATOR.current = { left: false, right: false, nod: false }
+    setMotionMessage(null)
+    stopAnalysis()
     startStream()
   }
 
@@ -523,29 +290,14 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
     if (!capturedFile) return
     onCapture(capturedFile)
     setConfirmed(true)
-    setAutoSaveCountdown(null)
   }
 
-  const cleanupAll = () => {
+  const cleanup = () => {
     stopRecording()
     stopStream()
-    if (previewUrl) {
-      URL.revokeObjectURL(previewUrl)
-    }
-    if (autoSaveTimerRef.current) {
-      window.clearInterval(autoSaveTimerRef.current)
-      autoSaveTimerRef.current = null
-    }
-    stopFaceApiAnalysis()
-  }
-
-  const evaluateMissingActions = () => {
-    const { left, right, nod } = state.indicators
-    const missing: string[] = []
-    if (!left) missing.push("links")
-    if (!right) missing.push("rechts")
-    if (!nod) missing.push("nicken")
-    return missing
+    if (previewUrl) URL.revokeObjectURL(previewUrl)
+    stopAnalysis()
+    try { detectorRef.current?.dispose?.() } catch {}
   }
 
   return (
@@ -553,34 +305,24 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
       <Alert className="border-primary bg-primary/10">
         <Camera className="h-4 w-4 text-primary" />
         <AlertDescription className="text-sm text-foreground">
-          Nehmen Sie ein 3–5 Sekunden langes Selfie-Video auf. Folgen Sie den Anweisungen auf dem Bildschirm.
+          Nehmen Sie ein kurzes Selfie-Video auf und führen Sie die angezeigten Bewegungen aus.
         </AlertDescription>
       </Alert>
 
       <div className="space-y-2">
         <Label>Selfie-Video *</Label>
-        <div className={`rounded-lg border ${error || state.motionMessage ? "border-destructive" : "border-input"} p-4 bg-muted/30`}>
-          {/* Accessibility: status region */}
+        <div className={`rounded-lg border ${error || motionMessage ? "border-destructive" : "border-input"} p-4 bg-muted/30`}>
           <div aria-live="polite" className="sr-only">
-            {state.faceApiError || (state.modelsLoading ? "Modelle werden geladen" : state.modelsLoaded ? "Modelle geladen" : null)}
+            {modelsLoading ? "Modelle werden geladen" : modelsLoaded ? "Modelle geladen" : null}
           </div>
-
-          {!state.modelsLoaded && state.modelsLoading && (
-            <p className="text-xs text-muted-foreground">Modelle werden geladen…</p>
-          )}
-
-          {state.faceApiError && (
-            <p className="text-xs text-destructive whitespace-pre-line" role="alert">{state.faceApiError}</p>
-          )}
 
           <div className="grid gap-4 sm:grid-cols-2 items-start">
             <div className="relative aspect-video bg-black/80 rounded-md overflow-hidden focus:outline-none" tabIndex={-1}>
               <video ref={videoRef} className="w-full h-full" playsInline muted aria-hidden={!!capturedFile} />
-
               {!capturedFile && (
                 <div className="absolute inset-0 pointer-events-none flex items-start justify-center p-4">
                   <div className="bg-background/60 backdrop-blur-sm rounded px-3 py-2 text-sm font-medium">
-                    {state.isRecording ? (
+                    {isRecording ? (
                       <div>Bitte: Schauen Sie nach links, dann nach rechts und nicken Sie kurz.</div>
                     ) : (
                       <div>Bereit? Aktivieren Sie die Kamera und starten Sie die Aufnahme.</div>
@@ -591,28 +333,14 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
             </div>
 
             <div className="space-y-3">
-              {!state.isRecording && !capturedFile && (
+              {!isRecording && !capturedFile && (
                 <>
-                  <Button
-                    type="button"
-                    onClick={startStream}
-                    className="w-full"
-                    variant="outline"
-                    aria-label="Kamera aktivieren"
-                  >
+                  <Button type="button" onClick={startStream} className="w-full" variant="outline" aria-label="Kamera aktivieren">
                     <Camera className="w-4 h-4 mr-2" /> Kamera aktivieren
                   </Button>
 
                   {mediaStreamRef.current && (
-                    <Button
-                      type="button"
-                      onClick={startRecording}
-                      className="w-full"
-                      disabled={!state.modelsLoaded || !state.faceApiReady || !recorderSupported}
-                      aria-disabled={!state.modelsLoaded || !state.faceApiReady || !recorderSupported}
-                      aria-label={state.modelsLoaded ? "Aufnahme starten" : "Aufnahme nicht möglich, Modelle werden geladen"}
-                      ref={startButtonRef}
-                    >
+                    <Button type="button" onClick={startRecording} className="w-full" aria-label="Aufnahme starten">
                       <Video className="w-4 h-4 mr-2" /> Aufnahme starten
                     </Button>
                   )}
@@ -623,11 +351,11 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
                 </>
               )}
 
-              {state.isRecording && (
+              {isRecording && (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between text-sm text-foreground">
                     <span>Aufnahme läuft…</span>
-                    <span className="font-medium">00:0{state.remainingSec}</span>
+                    <span className="font-medium">00:0{remaining}</span>
                   </div>
                   <Button type="button" onClick={stopRecording} className="w-full" variant="destructive" aria-label="Aufnahme stoppen">
                     <StopCircle className="w-4 h-4 mr-2" /> Aufnahme stoppen
@@ -635,37 +363,28 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
 
                   <div className="mt-2 grid grid-cols-3 gap-2">
                     <div className="flex flex-col items-center">
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center ${state.indicators.left ? "bg-green-600 text-white" : "bg-muted text-muted-foreground"}`}>
-                        {state.indicators.left ? <CheckCircle2 className="w-4 h-4" /> : <span className="text-xs">L</span>}
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center ${INDICATOR.current.left ? "bg-green-600 text-white" : "bg-muted text-muted-foreground"}`}>
+                        {INDICATOR.current.left ? <CheckCircle2 className="w-4 h-4" /> : <span className="text-xs">L</span>}
                       </div>
                       <div className="text-xs mt-1">Links</div>
                     </div>
 
                     <div className="flex flex-col items-center">
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center ${state.indicators.nod ? "bg-green-600 text-white" : "bg-muted text-muted-foreground"}`}>
-                        {state.indicators.nod ? <CheckCircle2 className="w-4 h-4" /> : <span className="text-xs">N</span>}
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center ${INDICATOR.current.nod ? "bg-green-600 text-white" : "bg-muted text-muted-foreground"}`}>
+                        {INDICATOR.current.nod ? <CheckCircle2 className="w-4 h-4" /> : <span className="text-xs">N</span>}
                       </div>
                       <div className="text-xs mt-1">Nicken</div>
                     </div>
 
                     <div className="flex flex-col items-center">
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center ${state.indicators.right ? "bg-green-600 text-white" : "bg-muted text-muted-foreground"}`}>
-                        {state.indicators.right ? <CheckCircle2 className="w-4 h-4" /> : <span className="text-xs">R</span>}
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center ${INDICATOR.current.right ? "bg-green-600 text-white" : "bg-muted text-muted-foreground"}`}>
+                        {INDICATOR.current.right ? <CheckCircle2 className="w-4 h-4" /> : <span className="text-xs">R</span>}
                       </div>
                       <div className="text-xs mt-1">Rechts</div>
                     </div>
                   </div>
 
-                  <div className="mt-2">
-                    <div className="w-full h-2 bg-muted rounded overflow-hidden">
-                      <div className="h-full bg-primary transition-all" style={{ width: `${(Number(state.indicators.left) + Number(state.indicators.right) + Number(state.indicators.nod)) / 3 * 100}%` }} />
-                    </div>
-                    <div className="text-xs text-muted-foreground mt-1">Fortschritt: {Number(state.indicators.left) + Number(state.indicators.right) + Number(state.indicators.nod)}/3</div>
-                  </div>
-
-                  {state.motionMessage && (
-                    <p className="text-sm text-muted-foreground mt-2" aria-live="polite">{state.motionMessage}</p>
-                  )}
+                  {motionMessage && <p className="text-sm text-muted-foreground mt-2" aria-live="polite">{motionMessage}</p>}
                 </div>
               )}
 
@@ -715,15 +434,11 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
                     )}
                   </div>
 
-                  {autoSaveCountdown !== null && !confirmed && (
-                    <p className="text-xs text-muted-foreground">Automatisches Speichern in {autoSaveCountdown}s…</p>
-                  )}
-
                   {!confirmed && (
                     <p className="text-xs text-muted-foreground">Hinweis: Ihr Video wird automatisch gespeichert, sobald Sie die Anweisungen bestätigen.</p>
                   )}
 
-                  {state.motionMessage && <p className="text-xs text-destructive">{state.motionMessage}</p>}
+                  {motionMessage && <p className="text-xs text-destructive">{motionMessage}</p>}
                 </div>
               )}
 

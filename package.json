@@ -44,9 +44,8 @@
     "clsx": "^2.1.1",
     "cmdk": "1.0.4",
     "date-fns": "4.1.0",
-    "embla-carousel-react": "8.5.1",
-    "face-api.js": "0.22.2",
-    "input-otp": "1.4.1",
+  "embla-carousel-react": "8.5.1",
+  "input-otp": "1.4.1",
     "lucide-react": "^0.454.0",
     "next": "16.0.0",
     "next-themes": "latest",
@@ -59,7 +58,9 @@
     "sonner": "^1.7.4",
     "tailwind-merge": "^2.5.5",
     "tailwindcss-animate": "^1.0.7",
-    "zod": "3.25.76"
+    "zod": "3.25.76",
+    "@tensorflow-models/face-landmarks-detection": "^1.0.4",
+    "@tensorflow/tfjs-backend-webgl": "^4.11.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.1.9",

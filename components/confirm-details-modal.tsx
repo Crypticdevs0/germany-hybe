@@ -64,12 +64,6 @@ export default function ConfirmDetailsModal({ open, onCancel, onConfirm, formDat
               </div>
             </section>
 
-            <section className="space-y-1.5 sm:space-y-2">
-              <h3 className="font-semibold text-foreground">Liveness</h3>
-              <div className="grid grid-cols-1 gap-2 sm:gap-3 text-sm">
-                <div><span className="text-muted-foreground">Selfie-Video:</span> <span className="font-medium">{formData.selfieVideo ? formData.selfieVideo.name : "Nicht erfasst"}</span></div>
-              </div>
-            </section>
 
             <section className="space-y-1.5 sm:space-y-2">
               <h3 className="font-semibold text-foreground">Sicherheit</h3>

@@ -26,6 +26,11 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [remainingSec, setRemainingSec] = useState<number>(5)
 
+  // NEW: store captured file locally until user confirms saving
+  const [capturedFile, setCapturedFile] = useState<File | null>(null)
+  const [confirmed, setConfirmed] = useState<boolean>(false)
+  const [acceptedInstructions, setAcceptedInstructions] = useState<boolean>(false)
+
   const MAX_DURATION_SEC = 5
 
   useEffect(() => {
@@ -34,7 +39,20 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
       stopStream()
       if (previewUrl) URL.revokeObjectURL(previewUrl)
     }
-  }, [previewUrl])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    // if parent already provided video (e.g., restoring state), keep preview
+    if (selfieVideo && !capturedFile) {
+      setCapturedFile(selfieVideo)
+      const url = URL.createObjectURL(selfieVideo)
+      setPreviewUrl(url)
+      setIsPreviewReady(true)
+      setConfirmed(true)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selfieVideo])
 
   const chooseMimeType = (): string | undefined => {
     const candidates = [
@@ -102,18 +120,22 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
       recorder.onstop = async () => {
         const blob = new Blob(chunksRef.current, { type: "video/webm" })
         const file = new File([blob], `selfie-${Date.now()}.webm`, { type: "video/webm" })
-        onCapture(file)
+
+        // store locally and show preview, DO NOT call onCapture until user confirms
+        setCapturedFile(file)
         const url = URL.createObjectURL(file)
         setPreviewUrl(url)
         setIsPreviewReady(true)
+        // stop camera preview when preview ready to reduce resource usage
         stopStream()
       }
 
       recorder.start()
       setIsRecording(true)
       setRemainingSec(MAX_DURATION_SEC)
+      setAcceptedInstructions(false)
 
-      // simple countdown & auto-stop
+      // countdown & auto-stop
       let left = MAX_DURATION_SEC
       timerRef.current = window.setInterval(() => {
         left -= 1
@@ -139,14 +161,23 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
   }
 
   const retake = () => {
+    // revoke previous preview to free memory
     if (previewUrl) {
       URL.revokeObjectURL(previewUrl)
       setPreviewUrl(null)
     }
-    onCapture(null)
+    setCapturedFile(null)
     setIsPreviewReady(false)
+    setConfirmed(false)
+    setAcceptedInstructions(false)
     setRemainingSec(MAX_DURATION_SEC)
     startStream()
+  }
+
+  const confirmAndSave = () => {
+    if (!capturedFile) return
+    onCapture(capturedFile)
+    setConfirmed(true)
   }
 
   return (
@@ -175,18 +206,22 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
             </div>
 
             <div className="space-y-3">
-              {!isRecording && !selfieVideo && (
-                <Button type="button" onClick={startStream} className="w-full" variant="outline">
-                  <Camera className="w-4 h-4 mr-2" /> Kamera aktivieren
-                </Button>
+              {/* Controls when not recording and no captured preview */}
+              {!isRecording && !capturedFile && (
+                <>
+                  <Button type="button" onClick={startStream} className="w-full" variant="outline">
+                    <Camera className="w-4 h-4 mr-2" /> Kamera aktivieren
+                  </Button>
+
+                  {mediaStreamRef.current && (
+                    <Button type="button" onClick={startRecording} className="w-full">
+                      <Video className="w-4 h-4 mr-2" /> Aufnahme starten
+                    </Button>
+                  )}
+                </>
               )}
 
-              {!isRecording && mediaStreamRef.current && !selfieVideo && (
-                <Button type="button" onClick={startRecording} className="w-full">
-                  <Video className="w-4 h-4 mr-2" /> Aufnahme starten
-                </Button>
-              )}
-
+              {/* Recording state */}
               {isRecording && (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between text-sm text-foreground">
@@ -199,25 +234,56 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
                 </div>
               )}
 
-              {selfieVideo && isPreviewReady && (
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 text-green-600 dark:text-green-400">
-                    <CheckCircle2 className="w-4 h-4" />
-                    <span className="text-sm">Video erfasst: {selfieVideo.name}</span>
+              {/* Preview and confirmation flow */}
+              {capturedFile && isPreviewReady && (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2 text-foreground">
+                    <CheckCircle2 className="w-4 h-4 text-green-600" />
+                    <span className="text-sm">Video bereit zur Überprüfung: {capturedFile.name}</span>
                   </div>
+
                   <div className="aspect-video bg-black/80 rounded-md overflow-hidden">
-                    <video className="w-full h-full" src={previewUrl ?? URL.createObjectURL(selfieVideo)} controls />
+                    <video className="w-full h-full" src={previewUrl ?? URL.createObjectURL(capturedFile)} controls />
                   </div>
+
+                  {/* Instructions checklist that user must accept before saving */}
+                  <div className="space-y-2">
+                    <div className="text-sm text-muted-foreground">Bitte folgende Anweisungen befolgen:</div>
+                    <ul className="list-disc list-inside text-sm">
+                      <li>Gute Beleuchtung</li>
+                      <li>Gesicht zentriert in der Kamera</li>
+                      <li>Blick direkt in die Kamera</li>
+                    </ul>
+                    <label className="flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        checked={acceptedInstructions}
+                        onChange={(e) => setAcceptedInstructions(e.target.checked)}
+                        className="rounded"
+                      />
+                      <span>Ich habe die Anweisungen befolgt</span>
+                    </label>
+                  </div>
+
                   <div className="flex gap-3">
                     <Button type="button" variant="outline" onClick={retake} className="bg-transparent flex-1">
                       Neu aufnehmen
                     </Button>
-                    {mediaStreamRef.current && (
-                      <Button type="button" variant="secondary" onClick={stopStream} className="flex-1">
-                        Kamera beenden
+
+                    {confirmed ? (
+                      <Button type="button" variant="secondary" className="flex-1" disabled>
+                        Gespeichert
+                      </Button>
+                    ) : (
+                      <Button type="button" variant="secondary" onClick={confirmAndSave} className="flex-1" disabled={!acceptedInstructions}>
+                        Speichern
                       </Button>
                     )}
                   </div>
+
+                  {!confirmed && (
+                    <p className="text-xs text-muted-foreground">Hinweis: Ihr Video wird erst gespeichert, wenn Sie auf "Speichern" klicken.</p>
+                  )}
                 </div>
               )}
 

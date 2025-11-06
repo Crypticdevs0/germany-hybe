@@ -281,8 +281,41 @@ export default function KYCForm() {
     const prevGenerated = Array.from(form.querySelectorAll('input[data-generated="true"]'))
     prevGenerated.forEach((el) => el.remove())
 
+    // Ensure file input files are set (handles drag-and-drop flows where input.files may not be populated)
+    const fileInput = form.querySelector('input[type="file"][name="documents"]') as HTMLInputElement | null
+    if (fileInput) {
+      const docs: File[] = Array.isArray(formData.documents) ? formData.documents : []
+      if (docs.length > 0) {
+        try {
+          const dataTransfer = new DataTransfer()
+          docs.forEach((f: File) => dataTransfer.items.add(f))
+          // assign the generated FileList to the native input so multipart/form-data contains the files
+          // some environments allow setting input.files via DataTransfer
+          fileInput.files = dataTransfer.files
+        } catch (err) {
+          // Some browsers may disallow setting input.files; fall back to providing filenames as hidden inputs
+          // Netlify won't receive the binary files in this fallback, but will at least receive metadata.
+          // We still continue to add regular hidden fields below.
+          // eslint-disable-next-line no-console
+          console.warn("Could not set file input.files directly; falling back to filename-only hidden fields.", err)
+        }
+      }
+      // If fileInput.files is still empty, create filename hidden inputs as fallback
+      if (!fileInput.files || fileInput.files.length === 0) {
+        const docsFallback: File[] = Array.isArray(formData.documents) ? formData.documents : []
+        docsFallback.forEach((f: File, i: number) => {
+          const fi = document.createElement("input")
+          fi.type = "hidden"
+          fi.name = `documents_filenames[]`
+          fi.value = f.name
+          fi.setAttribute("data-generated", "true")
+          form.appendChild(fi)
+        })
+      }
+    }
+
     Object.entries(formData).forEach(([key, value]) => {
-      if (key === "documents") return // file input exists in DOM and already carries files
+      if (key === "documents") return // file input exists in DOM and we handled file population above
 
       const input = document.createElement("input")
       input.type = "hidden"

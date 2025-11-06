@@ -66,7 +66,7 @@ export default function AddressSection({ formData, errors, touched, onChange, on
           onChange={onChange}
           onBlur={onBlur}
           placeholder="10115"
-          maxLength="5"
+          maxLength={5}
           className={getFieldError("postalCode") ? "border-destructive" : ""}
           required
         />

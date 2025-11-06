@@ -47,6 +47,8 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
   const baselineRef = useRef<{ noseX: number; noseY: number; eyeCenterY: number } | null>(null)
   const blinkStateRef = useRef<{ lastEAR: number; blinked: boolean }>({ lastEAR: 1, blinked: false })
 
+  const selectedMimeRef = useRef<string | undefined>(undefined)
+
   const MAX_DURATION_SEC = 5
   const AUTO_SAVE_DELAY_SEC = 3
 
@@ -112,8 +114,8 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
       const faceapi = await import("face-api.js")
       faceapiRef.current = faceapi
       setFaceApiReady(true)
-    } catch (e) {
-      setFaceApiError("face-api konnte nicht geladen werden.")
+    } catch (e: any) {
+      setFaceApiError(`face-api konnte nicht geladen werden: ${e?.message || String(e)}`)
       setFaceApiReady(false)
     }
   }
@@ -122,23 +124,48 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
     await ensureFaceApi()
     if (!faceapiRef.current) return
     if (modelsLoaded) return
-    try {
-      const faceapi = faceapiRef.current
-      const MODEL_URL = "https://cdn.jsdelivr.net/npm/face-api.js/models"
+
+    const faceapi = faceapiRef.current
+    const LOCAL_MODEL_URL = "/face-api/models"
+    const CDN_MODEL_URL = "https://cdn.jsdelivr.net/npm/face-api.js/models"
+
+    const tryLoad = async (url: string) => {
       await Promise.all([
-        faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
-        faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
-        faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL),
+        faceapi.nets.tinyFaceDetector.loadFromUri(url),
+        faceapi.nets.faceLandmark68Net.loadFromUri(url),
+        faceapi.nets.faceExpressionNet.loadFromUri(url),
       ])
-      setModelsLoaded(true)
-    } catch (e) {
-      setFaceApiError("Modelle konnten nicht geladen werden.")
+    }
+
+    try {
+      // Prefer local hosting for privacy and reliability; fall back to CDN
+      try {
+        await tryLoad(LOCAL_MODEL_URL)
+        setModelsLoaded(true)
+        setFaceApiError(null)
+        return
+      } catch (localErr) {
+        // local failed, attempt CDN
+      }
+
+      try {
+        await tryLoad(CDN_MODEL_URL)
+        setModelsLoaded(true)
+        setFaceApiError(null)
+        return
+      } catch (cdnErr: any) {
+        throw cdnErr || new Error("Unbekannter Fehler beim Laden der Modelle")
+      }
+    } catch (e: any) {
+      setFaceApiError(
+        `Modelle konnten nicht geladen werden: ${e?.message || String(e)}.\nBitte stellen Sie sicher, dass die Modelle unter /face-api/models bereitgestellt sind oder die Anwendung Zugriff auf ${CDN_MODEL_URL} hat.`
+      )
       setModelsLoaded(false)
     }
   }
 
   const chooseMimeType = (): string | undefined => {
-    const candidates = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm", ""]
+    const candidates = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm", "video/mp4"]
     for (const type of candidates) {
       if (!type) return undefined
       if (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(type)) return type
@@ -159,8 +186,9 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
       }
       setHasCamera(true)
       await loadModels()
-    } catch {
+    } catch (err) {
       setHasCamera(false)
+      setFaceApiError("Keine Kamera erkannt oder Zugriff verweigert.")
     }
   }
 
@@ -283,6 +311,11 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
     const stream = mediaStreamRef.current
     if (!stream) return
 
+    if (!faceApiReady || !modelsLoaded) {
+      setFaceApiError("Modelle werden noch geladen. Bitte warten Sie, bis \"Aufnahme starten\" aktiviert ist.")
+      return
+    }
+
     if (typeof MediaRecorder === "undefined") {
       setRecorderSupported(false)
       return
@@ -290,6 +323,7 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
 
     chunksRef.current = []
     const mimeType = chooseMimeType()
+    selectedMimeRef.current = mimeType
 
     try {
       const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream)
@@ -316,8 +350,10 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
           return
         }
 
-        const blob = new Blob(chunksRef.current, { type: "video/webm" })
-        const file = new File([blob], `selfie-${Date.now()}.webm`, { type: "video/webm" })
+        const mime = selectedMimeRef.current || (recorderRef.current && (recorderRef.current as any).mimeType) || "video/webm"
+        const ext = mime.includes("mp4") ? ".mp4" : mime.includes("webm") ? ".webm" : ".webm"
+        const blob = new Blob(chunksRef.current, { type: mime })
+        const file = new File([blob], `selfie-${Date.now()}${ext}`, { type: mime })
 
         setCapturedFile(file)
         const url = URL.createObjectURL(file)
@@ -353,8 +389,9 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
           }
         }
       }, 1000)
-    } catch {
+    } catch (e: any) {
       setRecorderSupported(false)
+      setFaceApiError(`Aufnahme konnte nicht gestartet werden: ${e?.message || String(e)}`)
     }
   }
 
@@ -420,7 +457,7 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
           )}
 
           {faceApiError && (
-            <p className="text-xs text-destructive">{faceApiError}</p>
+            <p className="text-xs text-destructive whitespace-pre-line">{faceApiError}</p>
           )}
 
           {!modelsLoaded && mediaStreamRef.current && (
@@ -452,7 +489,13 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
                   </Button>
 
                   {mediaStreamRef.current && (
-                    <Button type="button" onClick={startRecording} className="w-full">
+                    <Button
+                      type="button"
+                      onClick={startRecording}
+                      className="w-full"
+                      disabled={!modelsLoaded || !faceApiReady || !recorderSupported}
+                      aria-label="Nächster Schritt"
+                    >
                       <Video className="w-4 h-4 mr-2" /> Aufnahme starten
                     </Button>
                   )}

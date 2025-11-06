@@ -458,6 +458,8 @@ export default function KYCForm() {
               method="POST"
               encType="multipart/form-data"
             >
+              {/* Ensure non-AJAX fallback redirects to success */}
+              <input type="hidden" name="_next" value="/success" />
 
               {/* Step Sections */}
               {currentStep === 1 && (

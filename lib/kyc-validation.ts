@@ -203,7 +203,8 @@ export const validateStreetAddress = (address: string): boolean => {
   if (!address || address.trim().length === 0) return false
 
   // Allow street name with optional house number
-  const addressRegex = /^[a-zA-Z0-9\s'.-,]{5,100}$/
+  // Move the dash or escape it to avoid a range in the character class
+  const addressRegex = /^[a-zA-Z0-9\s'.,\-]{5,100}$/
 
   return addressRegex.test(address.trim())
 }

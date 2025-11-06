@@ -84,6 +84,7 @@ export default function DocumentUploadSection({ formData, errors, onDocumentsCha
         >
           <input
             id="documents"
+            name="documents"
             type="file"
             multiple
             onChange={handleChange}

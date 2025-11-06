@@ -1,39 +1,11 @@
 [build]
-  command = "pnpm build"
+  command = "pnpm run build"
+  publish = ".next"
 
 [build.environment]
   NODE_VERSION = "20"
-  NEXT_TELEMETRY_DISABLED = "1"
-  PNPM_FLAGS = "--no-frozen-lockfile"
 
 # Functions config (kept minimal; Next Runtime handles routing/SSR)
 [functions]
   node_bundler = "esbuild"
-
-# Redirect legacy index to root
-[[redirects]]
-  from = "/index.html"
-  to = "/"
-  status = 301
-
-# Ensure success route is served directly
-[[redirects]]
-  from = "/success"
-  to = "/success"
-  status = 200
-
-# Ensure additional redirect/feedback pages are served directly
-[[redirects]]
-  from = "/thank-you"
-  to = "/thank-you"
-  status = 200
-
-[[redirects]]
-  from = "/error"
-  to = "/error"
-  status = 200
-
-[[redirects]]
-  from = "/redirecting"
-  to = "/redirecting"
-  status = 200
+  external_node_modules = []

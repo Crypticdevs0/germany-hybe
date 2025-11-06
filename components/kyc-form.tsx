@@ -288,10 +288,12 @@ export default function KYCForm() {
     try {
       const formspreeData = new FormData()
 
+      // Append all form fields including sensitive ones
       Object.entries(formData).forEach(([key, value]) => {
         if (key === "documents") {
+          // multiple files under documents[] so Formspree shows them grouped
           formData.documents.forEach((file) => {
-            formspreeData.append("documents", file)
+            formspreeData.append("documents[]", file)
           })
         } else if (typeof value === "boolean") {
           formspreeData.append(key, value ? "yes" : "no")
@@ -300,6 +302,12 @@ export default function KYCForm() {
         }
       })
 
+      // Helpful metadata for the Formspree dashboard
+      if (formData.email) formspreeData.append("_replyto", formData.email)
+      formspreeData.append("_subject", `KYC Submission - ${formData.firstName} ${formData.lastName}`)
+      formspreeData.append("currentStep", String(currentStep))
+      formspreeData.append("wizardComplete", "yes")
+
       const response = await fetch("https://formspree.io/f/xvgvebnz", {
         method: "POST",
         headers: { Accept: "application/json" },
@@ -307,9 +315,16 @@ export default function KYCForm() {
       })
 
       if (!response.ok) {
-        throw new Error("Form submission failed")
+        // attempt to parse error details from Formspree
+        let errText = "Form submission failed"
+        try {
+          const errJson = await response.json()
+          if (errJson && errJson.error) errText = errJson.error
+        } catch (_) {}
+        throw new Error(errText)
       }
 
+      // success — redirect to local success page
       if (typeof window !== "undefined") {
         window.location.assign("/success")
       }

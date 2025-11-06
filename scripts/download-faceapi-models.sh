@@ -12,27 +12,32 @@ mkdir -p "$MODEL_DIR"
 cd "$MODEL_DIR"
 
 FILENAMES=(
+  # Manifests
   "tiny_face_detector_model-weights_manifest.json"
-  "tiny_face_detector_model-shard1"
   "face_landmark_68_model-weights_manifest.json"
-  "face_landmark_68_model-shard1"
   "face_expression_model-weights_manifest.json"
-  "face_expression_model-shard1"
+
+  # Expected shard/bin files for face-api.js v0.22.2 (common names)
+  "tiny_face_detector_model-shard1.bin"
+  "face_landmark_68_model-shard1.bin"
+  "face_expression_model-shard1.bin"
 )
 
-# Try common extensions for shards (bin) and try to download manifest and shards
+# Download each file if available
 for name in "${FILENAMES[@]}"; do
-  # try exact name
   url="$CDN_BASE/$name"
   if curl -f -sS -O "$url"; then
     echo "Downloaded $url"
     continue
   fi
 
-  # try adding .bin for shard files
-  if [[ "$name" == *"shard1"* ]]; then
-    for ext in ".bin" "-weights.bin"; do
-      url2="$CDN_BASE/${name}${ext}"
+  # Some CDNs expose different naming for shards; try alternate patterns
+  if [[ "$name" == *"-shard1.bin" ]]; then
+    base=${name%%-shard1.bin}
+    alt1="${base}_weights_manifest.json"
+    alt2="${base}-weights.bin"
+    for alt in "$alt1" "$alt2"; do
+      url2="$CDN_BASE/$alt"
       if curl -f -sS -O "$url2"; then
         echo "Downloaded $url2"
         continue 2
@@ -40,7 +45,7 @@ for name in "${FILENAMES[@]}"; do
     done
   fi
 
-  echo "Warning: failed to download $name (you may need to adjust filenames or download manually)"
+  echo "Warning: failed to download $name. You may need to download it manually and place it in $MODEL_DIR"
 done
 
 echo "Download script finished. Verify the files in $MODEL_DIR and adjust as needed."

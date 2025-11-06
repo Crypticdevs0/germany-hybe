@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: germany-hybe
+    env: node
+    region: oregon
+    plan: starter
+    branch: aura-studio
+    repo: https://github.com/Crypticdevs0/germany-hybe
+    autoDeploy: true
+    buildCommand: "npm run build"
+    startCommand: "npm run start"
+    root: "/"
+    instanceCount: 1
+    disk: 1024

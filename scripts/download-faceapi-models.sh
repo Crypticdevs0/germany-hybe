@@ -6,7 +6,7 @@ set -euo pipefail
 # version you use, adjust the FILENAMES array accordingly.
 
 MODEL_DIR="public/face-api/models"
-CDN_BASE="https://cdn.jsdelivr.net/npm/face-api.js/models"
+CDN_BASE="https://justadudewhohacks.github.io/face-api.js/models"
 
 mkdir -p "$MODEL_DIR"
 cd "$MODEL_DIR"
@@ -17,10 +17,10 @@ FILENAMES=(
   "face_landmark_68_model-weights_manifest.json"
   "face_expression_model-weights_manifest.json"
 
-  # Expected shard/bin files for face-api.js v0.22.2 (common names)
-  "tiny_face_detector_model-shard1.bin"
-  "face_landmark_68_model-shard1.bin"
-  "face_expression_model-shard1.bin"
+  # Expected shard/bin files for face-api.js v0.22.2 (GitHub Pages naming)
+  "tiny_face_detector_model-shard1"
+  "face_landmark_68_model-shard1"
+  "face_expression_model-shard1"
 )
 
 # Download each file if available
@@ -31,11 +31,12 @@ for name in "${FILENAMES[@]}"; do
     continue
   fi
 
-  # Some CDNs expose different naming for shards; try alternate patterns
-  if [[ "$name" == *"-shard1.bin" ]]; then
-    base=${name%%-shard1.bin}
-    alt1="${base}_weights_manifest.json"
-    alt2="${base}-weights.bin"
+  # Some mirrors use different naming; try alternate patterns
+  if [[ "$name" == *"-shard1" ]]; then
+    base=${name%%-shard1}
+    # try jsDelivr/npm style
+    alt1="${base}_model-weights_manifest.json"
+    alt2="${base}_model-shard1.bin"
     for alt in "$alt1" "$alt2"; do
       url2="$CDN_BASE/$alt"
       if curl -f -sS -O "$url2"; then

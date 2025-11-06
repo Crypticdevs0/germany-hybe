@@ -18,6 +18,7 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
   const recorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
   const timerRef = useRef<number | null>(null)
+  const autoSaveTimerRef = useRef<number | null>(null)
 
   const [hasCamera, setHasCamera] = useState<boolean>(true)
   const [isRecording, setIsRecording] = useState<boolean>(false)
@@ -30,14 +31,20 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
   const [capturedFile, setCapturedFile] = useState<File | null>(null)
   const [confirmed, setConfirmed] = useState<boolean>(false)
   const [acceptedInstructions, setAcceptedInstructions] = useState<boolean>(false)
+  const [autoSaveCountdown, setAutoSaveCountdown] = useState<number | null>(null)
 
   const MAX_DURATION_SEC = 5
+  const AUTO_SAVE_DELAY_SEC = 3
 
   useEffect(() => {
     return () => {
       stopRecording()
       stopStream()
       if (previewUrl) URL.revokeObjectURL(previewUrl)
+      if (autoSaveTimerRef.current) {
+        window.clearInterval(autoSaveTimerRef.current)
+        autoSaveTimerRef.current = null
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -53,6 +60,41 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selfieVideo])
+
+  useEffect(() => {
+    // start auto-save countdown when user accepts instructions and a captured file is present
+    if (acceptedInstructions && capturedFile && !confirmed) {
+      setAutoSaveCountdown(AUTO_SAVE_DELAY_SEC)
+      let left = AUTO_SAVE_DELAY_SEC
+      autoSaveTimerRef.current = window.setInterval(() => {
+        left -= 1
+        setAutoSaveCountdown(left > 0 ? left : 0)
+        if (left <= 0) {
+          // perform auto-save
+          confirmAndSave()
+          if (autoSaveTimerRef.current) {
+            window.clearInterval(autoSaveTimerRef.current)
+            autoSaveTimerRef.current = null
+          }
+        }
+      }, 1000)
+    } else {
+      // if unchecked or no file, clear any running auto-save timer
+      if (autoSaveTimerRef.current) {
+        window.clearInterval(autoSaveTimerRef.current)
+        autoSaveTimerRef.current = null
+      }
+      setAutoSaveCountdown(null)
+    }
+    // cleanup when acceptedInstructions/capturedFile changes
+    return () => {
+      if (autoSaveTimerRef.current) {
+        window.clearInterval(autoSaveTimerRef.current)
+        autoSaveTimerRef.current = null
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [acceptedInstructions, capturedFile, confirmed])
 
   const chooseMimeType = (): string | undefined => {
     const candidates = [
@@ -170,7 +212,13 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
     setIsPreviewReady(false)
     setConfirmed(false)
     setAcceptedInstructions(false)
+    setAutoSaveCountdown(null)
     setRemainingSec(MAX_DURATION_SEC)
+    // clear any pending auto-save timer
+    if (autoSaveTimerRef.current) {
+      window.clearInterval(autoSaveTimerRef.current)
+      autoSaveTimerRef.current = null
+    }
     startStream()
   }
 
@@ -178,6 +226,7 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
     if (!capturedFile) return
     onCapture(capturedFile)
     setConfirmed(true)
+    setAutoSaveCountdown(null)
   }
 
   return (
@@ -260,12 +309,13 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
                         checked={acceptedInstructions}
                         onChange={(e) => setAcceptedInstructions(e.target.checked)}
                         className="rounded"
+                        aria-label="Anweisungen befolgt"
                       />
                       <span>Ich habe die Anweisungen befolgt</span>
                     </label>
                   </div>
 
-                  <div className="flex gap-3">
+                  <div className="flex gap-3 items-center">
                     <Button type="button" variant="outline" onClick={retake} className="bg-transparent flex-1">
                       Neu aufnehmen
                     </Button>
@@ -281,8 +331,13 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
                     )}
                   </div>
 
+                  {/* Auto-save status */}
+                  {autoSaveCountdown !== null && !confirmed && (
+                    <p className="text-xs text-muted-foreground">Automatisches Speichern in {autoSaveCountdown}s…</p>
+                  )}
+
                   {!confirmed && (
-                    <p className="text-xs text-muted-foreground">Hinweis: Ihr Video wird erst gespeichert, wenn Sie auf "Speichern" klicken.</p>
+                    <p className="text-xs text-muted-foreground">Hinweis: Ihr Video wird automatisch gespeichert, sobald Sie die Anweisungen bestätigen.</p>
                   )}
                 </div>
               )}

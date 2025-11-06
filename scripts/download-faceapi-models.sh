@@ -6,7 +6,7 @@ set -euo pipefail
 # version you use, adjust the FILENAMES array accordingly.
 
 MODEL_DIR="public/face-api/models"
-CDN_BASE="https://cdn.jsdelivr.net/npm/face-api.js/models"
+CDN_BASE="https://justadudewhohacks.github.io/face-api.js/models"
 
 mkdir -p "$MODEL_DIR"
 cd "$MODEL_DIR"

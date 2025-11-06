@@ -280,30 +280,30 @@ export default function KYCForm() {
     }
   }
 
-  const submitToNetlify = async () => {
+  const submitToFormspree = async () => {
     setIsSubmitting(true)
     setSubmitError(null)
     setShowConfirm(false)
     setShowRedirect(true)
     try {
-      const netlifyFormData = new FormData()
-      netlifyFormData.append("form-name", "kyc-verification")
+      const formspreeData = new FormData()
 
       Object.entries(formData).forEach(([key, value]) => {
         if (key === "documents") {
-          formData.documents.forEach((file, index) => {
-            netlifyFormData.append(`document-${index + 1}`, file)
+          formData.documents.forEach((file) => {
+            formspreeData.append("documents", file)
           })
         } else if (typeof value === "boolean") {
-          netlifyFormData.append(key, value ? "yes" : "no")
+          formspreeData.append(key, value ? "yes" : "no")
         } else if (value !== null && value !== undefined) {
-          netlifyFormData.append(key, String(value))
+          formspreeData.append(key, String(value))
         }
       })
 
-      const response = await fetch("/", {
+      const response = await fetch("https://formspree.io/f/xvgvebnz", {
         method: "POST",
-        body: netlifyFormData,
+        headers: { Accept: "application/json" },
+        body: formspreeData,
       })
 
       if (!response.ok) {
@@ -406,18 +406,10 @@ export default function KYCForm() {
               onSubmit={handleSubmit}
               className="space-y-6"
               name="kyc-verification"
-              data-netlify="true"
-              data-netlify-honeypot="bot-field"
-              action="/success"
+              action="https://formspree.io/f/xvgvebnz"
               method="POST"
               encType="multipart/form-data"
             >
-              <input type="hidden" name="form-name" value="kyc-verification" />
-              <div className="hidden">
-                <label>
-                  Don't fill this out if you're human: <input name="bot-field" />
-                </label>
-              </div>
 
               {/* Step Sections */}
               {currentStep === 1 && (
@@ -483,7 +475,7 @@ export default function KYCForm() {
         <ConfirmDetailsModal
           open={showConfirm}
           onCancel={() => setShowConfirm(false)}
-          onConfirm={submitToNetlify}
+          onConfirm={submitToFormspree}
           formData={formData}
         />
         <RedirectOverlay show={showRedirect} message="Weiterleitung zur Erfolgsseite..." />

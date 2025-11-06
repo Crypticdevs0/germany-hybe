@@ -6,9 +6,6 @@
   NEXT_TELEMETRY_DISABLED = "1"
   PNPM_FLAGS = "--no-frozen-lockfile"
 
-[[plugins]]
-  package = "@netlify/plugin-nextjs"
-
 # Functions config (kept minimal; Next Runtime handles routing/SSR)
 [functions]
   node_bundler = "esbuild"

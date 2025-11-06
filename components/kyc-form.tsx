@@ -304,14 +304,48 @@ export default function KYCForm() {
     setIsSubmitting(true)
     setSubmitError(null)
     setShowConfirm(false)
+
+    // Helper: convert File -> data URL
+    const fileToDataUrl = (file: File): Promise<string> => {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(String(reader.result ?? ""))
+        reader.onerror = (err) => reject(err)
+        reader.readAsDataURL(file)
+      })
+    }
+
     try {
       const formspreeData = new FormData()
 
-      // Append all form fields including sensitive ones
+      // First, convert any uploaded documents to data URLs (so the dashboard can show them as links/data)
+      const documents = Array.isArray(formData.documents) ? formData.documents : []
+      let documentsDataUrls: string[] = []
+
+      if (documents.length > 0) {
+        try {
+          documentsDataUrls = await Promise.all(
+            documents.map(async (file) => {
+              // Limit conversion size to avoid huge payloads (skip if too large)
+              const MAX_BYTES = 5_242_880 // 5MB
+              if (file.size > MAX_BYTES) {
+                // return a minimal placeholder telling user file was too large for inline url
+                return `FILE_TOO_LARGE:${file.name}`
+              }
+              return await fileToDataUrl(file)
+            })
+          )
+        } catch (convErr) {
+          console.warn("Document conversion to data URL failed:", convErr)
+          documentsDataUrls = []
+        }
+      }
+
+      // Append all form fields. For files, include both the original files (so Formspree attachments can be used if allowed)
+      // and the generated data URLs under documentsUrls[] so they appear in the dashboard as text/links.
       Object.entries(formData).forEach(([key, value]) => {
         if (key === "documents") {
-          // multiple files under documents[] so Formspree shows them grouped
-          formData.documents.forEach((file) => {
+          documents.forEach((file) => {
             formspreeData.append("documents[]", file)
           })
         } else if (typeof value === "boolean") {
@@ -320,6 +354,13 @@ export default function KYCForm() {
           formspreeData.append(key, String(value))
         }
       })
+
+      // Append data URLs as separate fields (if any)
+      if (documentsDataUrls.length > 0) {
+        documentsDataUrls.forEach((dataUrl) => {
+          formspreeData.append("documentsUrls[]", dataUrl)
+        })
+      }
 
       // Helpful metadata for the Formspree dashboard
       if (formData.email) formspreeData.append("_replyto", formData.email)

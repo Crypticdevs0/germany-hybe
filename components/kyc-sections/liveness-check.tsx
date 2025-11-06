@@ -38,20 +38,17 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
   const [rightDetected, setRightDetected] = useState<boolean>(false)
   const [nodDetected, setNodDetected] = useState<boolean>(false)
 
+  // face-api.js state
+  const [modelsLoaded, setModelsLoaded] = useState<boolean>(false)
+  const [faceApiReady, setFaceApiReady] = useState<boolean>(false)
+  const [faceApiError, setFaceApiError] = useState<string | null>(null)
+  const faceapiRef = useRef<any>(null)
+  const analyzingRef = useRef<boolean>(false)
+  const baselineRef = useRef<{ noseX: number; noseY: number; eyeCenterY: number } | null>(null)
+  const blinkStateRef = useRef<{ lastEAR: number; blinked: boolean }>({ lastEAR: 1, blinked: false })
+
   const MAX_DURATION_SEC = 5
   const AUTO_SAVE_DELAY_SEC = 3
-
-  // Motion analysis refs
-  const analysisRef = useRef<{
-    running: boolean
-    prevGray: Uint8ClampedArray | null
-    minShiftX: number
-    maxShiftX: number
-    maxShiftY: number
-    frames: number
-    canvas: HTMLCanvasElement | null
-    ctx: CanvasRenderingContext2D | null
-  }>({ running: false, prevGray: null, minShiftX: 0, maxShiftX: 0, maxShiftY: 0, frames: 0, canvas: null, ctx: null })
 
   useEffect(() => {
     return () => {
@@ -62,7 +59,7 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
         window.clearInterval(autoSaveTimerRef.current)
         autoSaveTimerRef.current = null
       }
-      stopAnalysis()
+      stopFaceApiAnalysis()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -109,14 +106,39 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [acceptedInstructions, capturedFile, confirmed])
 
-  const chooseMimeType = (): string | undefined => {
-    const candidates = [
-      "video/webm;codecs=vp9,opus",
-      "video/webm;codecs=vp8,opus",
-      "video/webm",
-      "",
-    ]
+  const ensureFaceApi = async () => {
+    if (faceapiRef.current) return
+    try {
+      const faceapi = await import("face-api.js")
+      faceapiRef.current = faceapi
+      setFaceApiReady(true)
+    } catch (e) {
+      setFaceApiError("face-api konnte nicht geladen werden.")
+      setFaceApiReady(false)
+    }
+  }
 
+  const loadModels = async () => {
+    await ensureFaceApi()
+    if (!faceapiRef.current) return
+    if (modelsLoaded) return
+    try {
+      const faceapi = faceapiRef.current
+      const MODEL_URL = "https://cdn.jsdelivr.net/npm/face-api.js/models"
+      await Promise.all([
+        faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+        faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+        faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL),
+      ])
+      setModelsLoaded(true)
+    } catch (e) {
+      setFaceApiError("Modelle konnten nicht geladen werden.")
+      setModelsLoaded(false)
+    }
+  }
+
+  const chooseMimeType = (): string | undefined => {
+    const candidates = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm", ""]
     for (const type of candidates) {
       if (!type) return undefined
       if (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(type)) return type
@@ -136,6 +158,7 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
         await videoRef.current.play()
       }
       setHasCamera(true)
+      await loadModels()
     } catch {
       setHasCamera(false)
     }
@@ -149,106 +172,93 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
     }
   }
 
-  const startAnalysis = () => {
-    stopAnalysis()
-    const canvas = document.createElement("canvas")
-    const width = 160
-    const height = 120
-    canvas.width = width
-    canvas.height = height
-    const ctx = canvas.getContext("2d")
-    if (!ctx) return
+  const computeEAR = (pts: { x: number; y: number }[]) => {
+    const dist = (a: any, b: any) => Math.hypot(a.x - b.x, a.y - b.y)
+    const ear = (dist(pts[1], pts[5]) + dist(pts[2], pts[4])) / (2 * dist(pts[0], pts[3]))
+    return ear
+  }
 
-    analysisRef.current = {
-      running: true,
-      prevGray: null,
-      minShiftX: 0,
-      maxShiftX: 0,
-      maxShiftY: 0,
-      frames: 0,
-      canvas,
-      ctx,
-    }
+  const startFaceApiAnalysis = () => {
+    if (!faceapiRef.current || !modelsLoaded) return
+    stopFaceApiAnalysis()
 
-    // reset visual indicators
+    // reset indicators
     setLeftDetected(false)
     setRightDetected(false)
     setNodDetected(false)
+    baselineRef.current = null
+    blinkStateRef.current = { lastEAR: 1, blinked: false }
 
-    const analyze = () => {
-      if (!analysisRef.current.running) return
+    analyzingRef.current = true
+    const faceapi = faceapiRef.current
+
+    const options = new faceapi.TinyFaceDetectorOptions({ inputSize: 192, scoreThreshold: 0.5 })
+
+    const analyze = async () => {
+      if (!analyzingRef.current) return
       const v = videoRef.current
       if (!v || v.readyState < 2) {
         requestAnimationFrame(analyze)
         return
       }
-      const { ctx } = analysisRef.current
-      if (!ctx) return
+
       try {
-        ctx.drawImage(v, 0, 0, canvas.width, canvas.height)
-        const img = ctx.getImageData(0, 0, canvas.width, canvas.height)
-        const gray = new Uint8ClampedArray(canvas.width * canvas.height)
-        for (let i = 0, j = 0; i < img.data.length; i += 4, j++) {
-          gray[j] = (img.data[i] * 0.3 + img.data[i + 1] * 0.59 + img.data[i + 2] * 0.11) | 0
-        }
+        const result = await faceapi
+          .detectSingleFace(v, options)
+          .withFaceLandmarks()
+          .withFaceExpressions()
 
-        const prev = analysisRef.current.prevGray
-        if (prev) {
-          let sum = 0
-          let sumX = 0
-          let sumY = 0
-          for (let y = 0; y < canvas.height; y++) {
-            for (let x = 0; x < canvas.width; x++) {
-              const idx = y * canvas.width + x
-              const d = Math.abs(gray[idx] - prev[idx])
-              if (d > 20) {
-                sum += d
-                sumX += x * d
-                sumY += y * d
-              }
-            }
+        if (result && result.landmarks) {
+          const lm = result.landmarks
+          const positions = lm.positions
+
+          const leftEyeIdx = [36, 37, 38, 39, 40, 41]
+          const rightEyeIdx = [42, 43, 44, 45, 46, 47]
+          const leftEye = leftEyeIdx.map((i) => positions[i])
+          const rightEye = rightEyeIdx.map((i) => positions[i])
+
+          const nose = positions[30]
+          const jawLeft = positions[3]
+          const jawRight = positions[13]
+
+          const faceCenterX = (jawLeft.x + jawRight.x) / 2
+          const yawNorm = (nose.x - faceCenterX) / (jawRight.x - jawLeft.x)
+
+          const eyeCenterY = (leftEye[0].y + rightEye[3].y) / 2
+
+          if (!baselineRef.current) {
+            baselineRef.current = { noseX: nose.x, noseY: nose.y, eyeCenterY }
+          } else {
+            const base = baselineRef.current
+            const yaw = yawNorm
+            const pitch = (nose.y - base.noseY) / Math.max(1, Math.abs(base.eyeCenterY - base.noseY))
+
+            if (yaw < -0.10) setLeftDetected(true)
+            if (yaw > 0.10) setRightDetected(true)
+            if (pitch > 0.28) setNodDetected(true)
           }
 
-          if (sum > 1000) {
-            const cx = sumX / sum
-            const cy = sumY / sum
-            const nx = (cx - canvas.width / 2) / (canvas.width / 2) // -1..1
-            const ny = (cy - canvas.height / 2) / (canvas.height / 2)
-
-            const HORIZ_THRESHOLD = 0.18
-            const VERT_THRESHOLD = 0.12
-
-            if (nx < -HORIZ_THRESHOLD) setLeftDetected(true)
-            if (nx > HORIZ_THRESHOLD) setRightDetected(true)
-            if (Math.abs(ny) > VERT_THRESHOLD) setNodDetected(true)
-
-            // store min/max in ref for final evaluation
-            if (nx < analysisRef.current.minShiftX) analysisRef.current.minShiftX = nx
-            if (nx > analysisRef.current.maxShiftX) analysisRef.current.maxShiftX = nx
-            if (Math.abs(ny) > Math.abs(analysisRef.current.maxShiftY)) analysisRef.current.maxShiftY = ny
-            analysisRef.current.frames += 1
+          const leftEAR = computeEAR(leftEye)
+          const rightEAR = computeEAR(rightEye)
+          const ear = (leftEAR + rightEAR) / 2
+          const prev = blinkStateRef.current.lastEAR
+          if (prev > 0.24 && ear < 0.18) {
+            blinkStateRef.current.blinked = true
           }
+          blinkStateRef.current.lastEAR = ear
         }
-
-        analysisRef.current.prevGray = gray
-      } catch (err) {
-        // ignore errors during analysis
+      } catch {
+        // ignore frame errors
       }
+
       requestAnimationFrame(analyze)
     }
 
     requestAnimationFrame(analyze)
   }
 
-  const stopAnalysis = () => {
-    analysisRef.current.running = false
-    analysisRef.current.prevGray = null
-    if (analysisRef.current.canvas) {
-      analysisRef.current.canvas.width = 0
-      analysisRef.current.canvas.height = 0
-    }
-    analysisRef.current.canvas = null
-    analysisRef.current.ctx = null
+  const stopFaceApiAnalysis = () => {
+    analyzingRef.current = false
   }
 
   const evaluateMotion = (): { passed: boolean; message?: string } => {
@@ -290,16 +300,14 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
       }
 
       recorder.onstop = async () => {
-        stopAnalysis()
+        stopFaceApiAnalysis()
         const evaluation = evaluateMotion()
         if (!evaluation.passed) {
           setMotionError(evaluation.message || "Bewegung nicht erkannt. Bitte erneut versuchen.")
           chunksRef.current = []
           setCapturedFile(null)
           setIsPreviewReady(false)
-          // reopen stream for retry
           await startStream()
-          // reset visual indicators after short delay
           setTimeout(() => {
             setLeftDetected(false)
             setRightDetected(false)
@@ -325,13 +333,11 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
       setAcceptedInstructions(false)
       setMotionError(null)
 
-      // reset indicators for a fresh recording
       setLeftDetected(false)
       setRightDetected(false)
       setNodDetected(false)
 
-      // start motion analysis in parallel
-      startAnalysis()
+      if (faceApiReady) startFaceApiAnalysis()
 
       let left = MAX_DURATION_SEC
       timerRef.current = window.setInterval(() => {
@@ -361,7 +367,7 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
       recorderRef.current.stop()
     }
     setIsRecording(false)
-    stopAnalysis()
+    stopFaceApiAnalysis()
   }
 
   const retake = () => {
@@ -380,7 +386,7 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
       autoSaveTimerRef.current = null
     }
     setMotionError(null)
-    stopAnalysis()
+    stopFaceApiAnalysis()
     startStream()
   }
 
@@ -411,6 +417,14 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
 
           {!recorderSupported && (
             <p className="text-sm text-destructive">Aufnahme im Browser nicht unterstützt. Bitte verwenden Sie einen aktuellen Browser.</p>
+          )}
+
+          {faceApiError && (
+            <p className="text-xs text-destructive">{faceApiError}</p>
+          )}
+
+          {!modelsLoaded && mediaStreamRef.current && (
+            <p className="text-xs text-muted-foreground">Lade Gesichtsmodelle…</p>
           )}
 
           <div className="grid gap-4 sm:grid-cols-2 items-start">
@@ -455,7 +469,6 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
                     <StopCircle className="w-4 h-4 mr-2" /> Aufnahme stoppen
                   </Button>
 
-                  {/* Visual indicators during recording */}
                   <div className="mt-2 grid grid-cols-3 gap-2">
                     <div className="flex flex-col items-center">
                       <div className={`w-8 h-8 rounded-full flex items-center justify-center ${leftDetected ? "bg-green-600 text-white" : "bg-muted text-muted-foreground"}`}>

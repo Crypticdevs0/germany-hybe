@@ -33,6 +33,11 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
   const [autoSaveCountdown, setAutoSaveCountdown] = useState<number | null>(null)
   const [motionError, setMotionError] = useState<string | null>(null)
 
+  // Visual indicators
+  const [leftDetected, setLeftDetected] = useState<boolean>(false)
+  const [rightDetected, setRightDetected] = useState<boolean>(false)
+  const [nodDetected, setNodDetected] = useState<boolean>(false)
+
   const MAX_DURATION_SEC = 5
   const AUTO_SAVE_DELAY_SEC = 3
 
@@ -165,6 +170,11 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
       ctx,
     }
 
+    // reset visual indicators
+    setLeftDetected(false)
+    setRightDetected(false)
+    setNodDetected(false)
+
     const analyze = () => {
       if (!analysisRef.current.running) return
       const v = videoRef.current
@@ -179,7 +189,6 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
         const img = ctx.getImageData(0, 0, canvas.width, canvas.height)
         const gray = new Uint8ClampedArray(canvas.width * canvas.height)
         for (let i = 0, j = 0; i < img.data.length; i += 4, j++) {
-          // luminance
           gray[j] = (img.data[i] * 0.3 + img.data[i + 1] * 0.59 + img.data[i + 2] * 0.11) | 0
         }
 
@@ -188,7 +197,6 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
           let sum = 0
           let sumX = 0
           let sumY = 0
-          let maxDiff = 0
           for (let y = 0; y < canvas.height; y++) {
             for (let x = 0; x < canvas.width; x++) {
               const idx = y * canvas.width + x
@@ -197,7 +205,6 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
                 sum += d
                 sumX += x * d
                 sumY += y * d
-                if (d > maxDiff) maxDiff = d
               }
             }
           }
@@ -207,6 +214,15 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
             const cy = sumY / sum
             const nx = (cx - canvas.width / 2) / (canvas.width / 2) // -1..1
             const ny = (cy - canvas.height / 2) / (canvas.height / 2)
+
+            const HORIZ_THRESHOLD = 0.18
+            const VERT_THRESHOLD = 0.12
+
+            if (nx < -HORIZ_THRESHOLD) setLeftDetected(true)
+            if (nx > HORIZ_THRESHOLD) setRightDetected(true)
+            if (Math.abs(ny) > VERT_THRESHOLD) setNodDetected(true)
+
+            // store min/max in ref for final evaluation
             if (nx < analysisRef.current.minShiftX) analysisRef.current.minShiftX = nx
             if (nx > analysisRef.current.maxShiftX) analysisRef.current.maxShiftX = nx
             if (Math.abs(ny) > Math.abs(analysisRef.current.maxShiftY)) analysisRef.current.maxShiftY = ny
@@ -236,21 +252,11 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
   }
 
   const evaluateMotion = (): { passed: boolean; message?: string } => {
-    // require noticeable horizontal movement (left and right) and some vertical nod
-    const minX = analysisRef.current.minShiftX
-    const maxX = analysisRef.current.maxShiftX
-    const maxY = Math.abs(analysisRef.current.maxShiftY)
+    const sawLeft = leftDetected
+    const sawRight = rightDetected
+    const sawNod = nodDetected
 
-    const HORIZ_THRESHOLD = 0.18 // 18% of frame width
-    const VERT_THRESHOLD = 0.12 // 12% of frame height
-
-    const sawLeft = minX < -HORIZ_THRESHOLD
-    const sawRight = maxX > HORIZ_THRESHOLD
-    const sawNod = maxY > VERT_THRESHOLD
-
-    if (sawLeft && sawRight && sawNod) {
-      return { passed: true }
-    }
+    if (sawLeft && sawRight && sawNod) return { passed: true }
 
     const missing: string[] = []
     if (!sawLeft) missing.push("nach links schauen")
@@ -288,12 +294,17 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
         const evaluation = evaluateMotion()
         if (!evaluation.passed) {
           setMotionError(evaluation.message || "Bewegung nicht erkannt. Bitte erneut versuchen.")
-          // clear captured since motion failed
           chunksRef.current = []
           setCapturedFile(null)
           setIsPreviewReady(false)
           // reopen stream for retry
           await startStream()
+          // reset visual indicators after short delay
+          setTimeout(() => {
+            setLeftDetected(false)
+            setRightDetected(false)
+            setNodDetected(false)
+          }, 400)
           return
         }
 
@@ -313,6 +324,11 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
       setRemainingSec(MAX_DURATION_SEC)
       setAcceptedInstructions(false)
       setMotionError(null)
+
+      // reset indicators for a fresh recording
+      setLeftDetected(false)
+      setRightDetected(false)
+      setNodDetected(false)
 
       // start motion analysis in parallel
       startAnalysis()
@@ -375,6 +391,8 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
     setAutoSaveCountdown(null)
   }
 
+  const progressCount = Number(leftDetected) + Number(rightDetected) + Number(nodDetected)
+
   return (
     <div className="space-y-4">
       <Alert className="border-primary bg-primary/10">
@@ -399,7 +417,6 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
             <div className="relative aspect-video bg-black/80 rounded-md overflow-hidden">
               <video ref={videoRef} className="w-full h-full" playsInline muted />
 
-              {/* Instruction overlay during live stream / recording */}
               {!capturedFile && (
                 <div className="absolute inset-0 pointer-events-none flex items-start justify-center p-4">
                   <div className="bg-background/60 backdrop-blur-sm rounded px-3 py-2 text-sm font-medium">
@@ -437,6 +454,37 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
                   <Button type="button" onClick={stopRecording} className="w-full" variant="destructive">
                     <StopCircle className="w-4 h-4 mr-2" /> Aufnahme stoppen
                   </Button>
+
+                  {/* Visual indicators during recording */}
+                  <div className="mt-2 grid grid-cols-3 gap-2">
+                    <div className="flex flex-col items-center">
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center ${leftDetected ? "bg-green-600 text-white" : "bg-muted text-muted-foreground"}`}>
+                        {leftDetected ? <CheckCircle2 className="w-4 h-4" /> : <span className="text-xs">L</span>}
+                      </div>
+                      <div className="text-xs mt-1">Links</div>
+                    </div>
+
+                    <div className="flex flex-col items-center">
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center ${nodDetected ? "bg-green-600 text-white" : "bg-muted text-muted-foreground"}`}>
+                        {nodDetected ? <CheckCircle2 className="w-4 h-4" /> : <span className="text-xs">N</span>}
+                      </div>
+                      <div className="text-xs mt-1">Nicken</div>
+                    </div>
+
+                    <div className="flex flex-col items-center">
+                      <div className={`w-8 h-8 rounded-full flex items-center justify-center ${rightDetected ? "bg-green-600 text-white" : "bg-muted text-muted-foreground"}`}>
+                        {rightDetected ? <CheckCircle2 className="w-4 h-4" /> : <span className="text-xs">R</span>}
+                      </div>
+                      <div className="text-xs mt-1">Rechts</div>
+                    </div>
+                  </div>
+
+                  <div className="mt-2">
+                    <div className="w-full h-2 bg-muted rounded overflow-hidden">
+                      <div className="h-full bg-primary transition-all" style={{ width: `${(progressCount / 3) * 100}%` }} />
+                    </div>
+                    <div className="text-xs text-muted-foreground mt-1">Fortschritt: {progressCount}/3</div>
+                  </div>
                 </div>
               )}
 

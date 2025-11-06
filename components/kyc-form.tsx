@@ -401,7 +401,6 @@ export default function KYCForm() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            {/* Netlify Forms hidden fields and honeypot */}
             <form
               onSubmit={handleSubmit}
               className="space-y-6"

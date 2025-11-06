@@ -17,21 +17,46 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
   const mediaStreamRef = useRef<MediaStream | null>(null)
   const recorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
+  const timerRef = useRef<number | null>(null)
 
   const [hasCamera, setHasCamera] = useState<boolean>(true)
   const [isRecording, setIsRecording] = useState<boolean>(false)
   const [isPreviewReady, setIsPreviewReady] = useState<boolean>(false)
+  const [recorderSupported, setRecorderSupported] = useState<boolean>(true)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [remainingSec, setRemainingSec] = useState<number>(5)
+
+  const MAX_DURATION_SEC = 5
 
   useEffect(() => {
     return () => {
       stopRecording()
       stopStream()
+      if (previewUrl) URL.revokeObjectURL(previewUrl)
     }
-  }, [])
+  }, [previewUrl])
+
+  const chooseMimeType = (): string | undefined => {
+    const candidates = [
+      "video/webm;codecs=vp9,opus",
+      "video/webm;codecs=vp8,opus",
+      "video/webm",
+      "",
+    ]
+
+    for (const type of candidates) {
+      if (!type) return undefined
+      if (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(type)) return type
+    }
+    return undefined
+  }
 
   const startStream = async () => {
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true })
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: true,
+      })
       mediaStreamRef.current = stream
       if (videoRef.current) {
         videoRef.current.srcObject = stream
@@ -58,26 +83,55 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
     const stream = mediaStreamRef.current
     if (!stream) return
 
+    if (typeof MediaRecorder === "undefined") {
+      setRecorderSupported(false)
+      return
+    }
+
     chunksRef.current = []
-    const recorder = new MediaRecorder(stream, { mimeType: "video/webm;codecs=vp9,opus" })
-    recorderRef.current = recorder
+    const mimeType = chooseMimeType()
 
-    recorder.ondataavailable = (e) => {
-      if (e.data && e.data.size > 0) chunksRef.current.push(e.data)
+    try {
+      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream)
+      recorderRef.current = recorder
+
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) chunksRef.current.push(e.data)
+      }
+
+      recorder.onstop = async () => {
+        const blob = new Blob(chunksRef.current, { type: "video/webm" })
+        const file = new File([blob], `selfie-${Date.now()}.webm`, { type: "video/webm" })
+        onCapture(file)
+        const url = URL.createObjectURL(file)
+        setPreviewUrl(url)
+        setIsPreviewReady(true)
+        stopStream()
+      }
+
+      recorder.start()
+      setIsRecording(true)
+      setRemainingSec(MAX_DURATION_SEC)
+
+      // simple countdown & auto-stop
+      let left = MAX_DURATION_SEC
+      timerRef.current = window.setInterval(() => {
+        left -= 1
+        setRemainingSec(left)
+        if (left <= 0) {
+          stopRecording()
+        }
+      }, 1000)
+    } catch {
+      setRecorderSupported(false)
     }
-
-    recorder.onstop = async () => {
-      const blob = new Blob(chunksRef.current, { type: "video/webm" })
-      const file = new File([blob], `selfie-${Date.now()}.webm`, { type: "video/webm" })
-      onCapture(file)
-      setIsPreviewReady(true)
-    }
-
-    recorder.start()
-    setIsRecording(true)
   }
 
   const stopRecording = () => {
+    if (timerRef.current) {
+      window.clearInterval(timerRef.current)
+      timerRef.current = null
+    }
     if (recorderRef.current && recorderRef.current.state !== "inactive") {
       recorderRef.current.stop()
     }
@@ -85,8 +139,13 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
   }
 
   const retake = () => {
+    if (previewUrl) {
+      URL.revokeObjectURL(previewUrl)
+      setPreviewUrl(null)
+    }
     onCapture(null)
     setIsPreviewReady(false)
+    setRemainingSec(MAX_DURATION_SEC)
     startStream()
   }
 
@@ -101,9 +160,13 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
 
       <div className="space-y-2">
         <Label>Selfie-Video *</Label>
-        <div className={`rounded-lg border ${error ? "border-destructive" : "border-input"} p-4 bg-muted/30`}> 
+        <div className={`rounded-lg border ${error ? "border-destructive" : "border-input"} p-4 bg-muted/30`}>
           {!hasCamera && (
             <p className="text-sm text-destructive">Keine Kamera erkannt. Bitte erlauben Sie den Kamerazugriff.</p>
+          )}
+
+          {!recorderSupported && (
+            <p className="text-sm text-destructive">Aufnahme im Browser nicht unterstützt. Bitte verwenden Sie einen aktuellen Browser.</p>
           )}
 
           <div className="grid gap-4 sm:grid-cols-2 items-start">
@@ -125,9 +188,15 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
               )}
 
               {isRecording && (
-                <Button type="button" onClick={stopRecording} className="w-full" variant="destructive">
-                  <StopCircle className="w-4 h-4 mr-2" /> Aufnahme stoppen
-                </Button>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between text-sm text-foreground">
+                    <span>Aufnahme läuft…</span>
+                    <span className="font-medium">00:0{remainingSec}</span>
+                  </div>
+                  <Button type="button" onClick={stopRecording} className="w-full" variant="destructive">
+                    <StopCircle className="w-4 h-4 mr-2" /> Aufnahme stoppen
+                  </Button>
+                </div>
               )}
 
               {selfieVideo && isPreviewReady && (
@@ -137,15 +206,17 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
                     <span className="text-sm">Video erfasst: {selfieVideo.name}</span>
                   </div>
                   <div className="aspect-video bg-black/80 rounded-md overflow-hidden">
-                    <video className="w-full h-full" src={URL.createObjectURL(selfieVideo)} controls />
+                    <video className="w-full h-full" src={previewUrl ?? URL.createObjectURL(selfieVideo)} controls />
                   </div>
                   <div className="flex gap-3">
                     <Button type="button" variant="outline" onClick={retake} className="bg-transparent flex-1">
                       Neu aufnehmen
                     </Button>
-                    <Button type="button" variant="secondary" onClick={stopStream} className="flex-1">
-                      Kamera beenden
-                    </Button>
+                    {mediaStreamRef.current && (
+                      <Button type="button" variant="secondary" onClick={stopStream} className="flex-1">
+                        Kamera beenden
+                      </Button>
+                    )}
                   </div>
                 </div>
               )}

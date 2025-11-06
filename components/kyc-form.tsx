@@ -300,115 +300,25 @@ export default function KYCForm() {
     }
   }
 
-  const submitToFormspree = async () => {
+  const submitToNetlify = async () => {
+    // Netlify will handle the form submission when the form is submitted as a standard multipart/form-data POST.
+    // We ensure all dynamic fields are present as hidden inputs and then submit the native form element.
     setIsSubmitting(true)
     setSubmitError(null)
     setShowConfirm(false)
 
-    // Helper: convert File -> data URL
-    const fileToDataUrl = (file: File): Promise<string> => {
-      return new Promise((resolve, reject) => {
-        const reader = new FileReader()
-        reader.onload = () => resolve(String(reader.result ?? ""))
-        reader.onerror = (err) => reject(err)
-        reader.readAsDataURL(file)
-      })
-    }
-
     try {
-      const formspreeData = new FormData()
+      ensureHiddenInputs()
 
-      // First, convert any uploaded documents to data URLs (so the dashboard can show them as links/data)
-      const documents = Array.isArray(formData.documents) ? formData.documents : []
-      let documentsDataUrls: string[] = []
-
-      if (documents.length > 0) {
-        try {
-          documentsDataUrls = await Promise.all(
-            documents.map(async (file) => {
-              // Limit conversion size to avoid huge payloads (skip if too large)
-              const MAX_BYTES = 5_242_880 // 5MB
-              if (file.size > MAX_BYTES) {
-                // return a minimal placeholder telling user file was too large for inline url
-                return `FILE_TOO_LARGE:${file.name}`
-              }
-              return await fileToDataUrl(file)
-            })
-          )
-        } catch (convErr) {
-          console.warn("Document conversion to data URL failed:", convErr)
-          documentsDataUrls = []
-        }
-      }
-
-      // Append all form fields. For files, include both the original files (so Formspree attachments can be used if allowed)
-      // and the generated data URLs under documentsUrls[] so they appear in the dashboard as text/links.
-      Object.entries(formData).forEach(([key, value]) => {
-        if (key === "documents") {
-          documents.forEach((file) => {
-            formspreeData.append("documents[]", file)
-          })
-        } else if (typeof value === "boolean") {
-          formspreeData.append(key, value ? "yes" : "no")
-        } else if (value !== null && value !== undefined) {
-          formspreeData.append(key, String(value))
-        }
-      })
-
-      // Append data URLs as separate fields (if any)
-      if (documentsDataUrls.length > 0) {
-        documentsDataUrls.forEach((dataUrl) => {
-          formspreeData.append("documentsUrls[]", dataUrl)
-        })
-      }
-
-      // Helpful metadata for the Formspree dashboard
-      if (formData.email) formspreeData.append("_replyto", formData.email)
-      formspreeData.append("_subject", `KYC Submission - ${formData.firstName} ${formData.lastName}`)
-      formspreeData.append("currentStep", String(currentStep))
-      formspreeData.append("wizardComplete", "yes")
-
-      const response = await fetch("https://formspree.io/f/xvgvebnz", {
-        method: "POST",
-        headers: { Accept: "application/json" },
-        body: formspreeData,
-      })
-
-      if (!response.ok) {
-        // attempt to parse error details from Formspree
-        let errText = "Form submission failed"
-        try {
-          const errJson = await response.json()
-          if (errJson && errJson.error) errText = errJson.error
-        } catch (_) {}
-        throw new Error(errText)
-      }
-
-      // success — show redirect overlay then navigate
-      setShowRedirect(true)
-      if (typeof window !== "undefined") {
-        window.location.assign("/success")
+      if (formRef.current) {
+        // Submit the native form so Netlify Forms can process it and redirect to /success
+        formRef.current.submit()
+      } else {
+        throw new Error("Form not available")
       }
     } catch (error) {
-      console.error("Submission error:", error)
+      console.error("Netlify submission error:", error)
       setSubmitError("Es ist ein Fehler aufgetreten. Bitte versuchen Sie es erneut.")
-      setShowRedirect(false)
-
-      // Fallback: attempt full form submission (non-AJAX) as last resort
-      try {
-        ensureHiddenInputs()
-        if (formRef.current) {
-          // this will perform a multipart/form-data submit using the actual file inputs in the form
-          formRef.current.submit()
-          return
-        }
-      } catch (fallbackErr) {
-        console.error("Fallback form submit failed:", fallbackErr)
-      }
-
-      if (typeof window !== "undefined") {
-        window.location.assign("/error")
-      }
     } finally {
       setIsSubmitting(false)
     }
@@ -495,12 +405,13 @@ export default function KYCForm() {
               onSubmit={handleSubmit}
               className="space-y-6"
               name="kyc-verification"
-              action="https://formspree.io/f/xvgvebnz"
+              action="/success"
               method="POST"
               encType="multipart/form-data"
+              data-netlify="true"
             >
-              {/* Ensure non-AJAX fallback redirects to success */}
-              <input type="hidden" name="_next" value="/success" />
+              {/* Netlify form name (required for Netlify to detect the form) */}
+              <input type="hidden" name="form-name" value="kyc-verification" />
 
               {/* Step Sections */}
               {currentStep === 1 && (
@@ -566,7 +477,7 @@ export default function KYCForm() {
         <ConfirmDetailsModal
           open={showConfirm}
           onCancel={() => setShowConfirm(false)}
-          onConfirm={submitToFormspree}
+          onConfirm={submitToNetlify}
           formData={formData}
         />
         <RedirectOverlay show={showRedirect} message="Weiterleitung zur Erfolgsseite..." />

@@ -186,7 +186,14 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
     dispatch({ type: "models/loading" })
 
     const LOCAL_MODEL_URL = "/face-api/models"
-    const CDN_MODEL_URL = "https://cdn.jsdelivr.net/npm/face-api.js/models"
+    // Prefer the official GitHub Pages mirror, jsDelivr path may 404 for some versions
+    const FALLBACK_URLS = [
+      "https://justadudewhohacks.github.io/face-api.js/models",
+      // additional mirrors commonly used
+      "https://unpkg.com/face-api.js@0.22.2/weights",
+      "https://cdn.jsdelivr.net/gh/justadudewhohacks/face-api.js@0.22.2/weights",
+      "https://cdn.jsdelivr.net/npm/face-api.js/models",
+    ]
 
     const tryLoad = async (url: string) => {
       await Promise.all([
@@ -196,25 +203,20 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
       ])
     }
 
-    let attempt = 0
     let lastErr: any = null
-    while (attempt <= retries) {
+    const sources = [LOCAL_MODEL_URL, ...FALLBACK_URLS]
+    for (let i = 0; i < sources.length && (i === 0 || i - 1 < retries); i++) {
+      const src = sources[i]
       try {
-        if (attempt === 0) {
-          // prefer local
-          await tryLoad(LOCAL_MODEL_URL)
-        } else {
-          await tryLoad(CDN_MODEL_URL)
-        }
+        await tryLoad(src)
         dispatch({ type: "models/loaded" })
         // focus start button for accessibility
         setTimeout(() => startButtonRef.current?.focus(), 50)
         return
       } catch (err) {
         lastErr = err
-        attempt += 1
-        // exponential backoff
-        await new Promise((r) => setTimeout(r, 300 * attempt))
+        // exponential backoff between attempts
+        await new Promise((r) => setTimeout(r, 300 * (i + 1)))
       }
     }
 

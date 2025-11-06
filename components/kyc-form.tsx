@@ -16,7 +16,8 @@ import SecuritySection from "./kyc-sections/security"
 import DocumentUploadSection from "./kyc-sections/document-upload"
 import ConfirmDetailsModal from "./confirm-details-modal"
 import RedirectOverlay from "./redirect-overlay"
-import LivenessCheckSection from "./kyc-sections/liveness-check"
+import dynamic from "next/dynamic"
+const LivenessCheckSection = dynamic(() => import("./kyc-sections/liveness-check"), { ssr: false })
 
 interface FormData {
   // Personal Info

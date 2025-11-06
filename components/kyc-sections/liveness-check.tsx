@@ -12,39 +12,24 @@ interface LivenessCheckSectionProps {
   onCapture: (file: File | null) => void
 }
 
-// Modern liveness using TensorFlow face-landmarks-detection (MediaPipe FaceMesh runtime)
+// Lightweight fallback liveness section without TensorFlow/MediaPipe
+// Allows users to upload or record a short video using the browser MediaRecorder
 export default function LivenessCheckSection({ selfieVideo, error, onCapture }: LivenessCheckSectionProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const mediaStreamRef = useRef<MediaStream | null>(null)
   const recorderRef = useRef<MediaRecorder | null>(null)
   const chunksRef = useRef<Blob[]>([])
-  const detectorRef = useRef<any | null>(null)
-  const analyzingRef = useRef(false)
-  const lastAnalyzeRef = useRef(0)
 
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [capturedFile, setCapturedFile] = useState<File | null>(null)
   const [confirmed, setConfirmed] = useState(false)
   const [acceptedInstructions, setAcceptedInstructions] = useState(false)
-
-  const [modelsLoading, setModelsLoading] = useState(false)
-  const [modelsLoaded, setModelsLoaded] = useState(false)
-  const [motionMessage, setMotionMessage] = useState<string | null>(null)
   const [isRecording, setIsRecording] = useState(false)
   const [remaining, setRemaining] = useState<number>(5)
   const [recorderSupported, setRecorderSupported] = useState(true)
-
-  const INDICATOR = useRef({ left: false, right: false, nod: false })
+  const [motionMessage, setMotionMessage] = useState<string | null>(null)
 
   const MAX_DURATION_SEC = 5
-  const ANALYZE_INTERVAL_MS = 120
-
-  useEffect(() => {
-    // preload detector in background
-    (async () => await ensureDetector())()
-    return () => cleanup()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
 
   useEffect(() => {
     if (selfieVideo && !capturedFile) {
@@ -53,43 +38,13 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
       setPreviewUrl(url)
       setConfirmed(true)
     }
+
+    return () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl)
+      stopStream()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selfieVideo])
-
-  const ensureDetector = async () => {
-    if (detectorRef.current) return
-    try {
-      setModelsLoading(true)
-      // load tfjs webgl backend and the face-landmarks-detection model dynamically
-      const tfBackend = await import("@tensorflow/tfjs-backend-webgl")
-      const facemesh = await import("@tensorflow-models/face-landmarks-detection")
-      // set backend
-      if (tfBackend && tfBackend.setWebGLContext) {
-        // some builds export differently; try standard ready
-      }
-      const tf = await import("@tensorflow/tfjs-core")
-      try {
-        await (tf as any).setBackend?.("webgl")
-        await (tf as any).ready()
-      } catch {
-        // fallback: continue even if backend set fails
-      }
-
-      // create detector using MediaPipe FaceMesh (fast and accurate)
-      const detector = await (facemesh as any).createDetector((facemesh as any).SupportedModels.MediaPipeFaceMesh, {
-        runtime: "tfjs",
-        maxFaces: 1,
-        refineLandmarks: true,
-      })
-      detectorRef.current = detector
-      setModelsLoaded(true)
-      setModelsLoading(false)
-    } catch (e: any) {
-      console.error("liveness: failed to load detector", e)
-      setModelsLoading(false)
-      setMotionMessage("Modelle konnten nicht geladen werden. Bitte prüfen Sie Ihre Verbindung.")
-    }
-  }
 
   const startStream = async () => {
     try {
@@ -99,8 +54,6 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
         videoRef.current.srcObject = s
         await videoRef.current.play()
       }
-      // ensure detector is ready
-      await ensureDetector()
     } catch (e: any) {
       console.error("liveness: startStream", e)
       setMotionMessage("Kamera nicht verfügbar oder Zugriff verweigert.")
@@ -111,71 +64,6 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
     mediaStreamRef.current?.getTracks().forEach((t) => t.stop())
     mediaStreamRef.current = null
     if (videoRef.current) videoRef.current.srcObject = null
-    stopAnalysis()
-  }
-
-  const startAnalysis = () => {
-    if (!detectorRef.current || !videoRef.current) return
-    INDICATOR.current = { left: false, right: false, nod: false }
-    analyzingRef.current = true
-
-    const analyze = async () => {
-      if (!analyzingRef.current) return
-      const now = performance.now()
-      if (now - lastAnalyzeRef.current < ANALYZE_INTERVAL_MS) {
-        requestAnimationFrame(analyze)
-        return
-      }
-      lastAnalyzeRef.current = now
-
-      try {
-        const faces = await detectorRef.current.estimateFaces(videoRef.current, { flipHorizontal: true })
-        if (!faces || faces.length === 0) {
-          setMotionMessage("Gesicht nicht erkannt. Bitte halten Sie Ihr Gesicht vor die Kamera.")
-          requestAnimationFrame(analyze)
-          return
-        }
-
-        const f = faces[0]
-        // try to choose a nose-like keypoint
-        const kp = (f.keypoints || []).find((k: any) => k.name && k.name.toLowerCase().includes("nose")) || f.keypoints?.[1]
-        const bbox = f.boundingBox || f.box || null
-        if (!kp || !bbox) {
-          requestAnimationFrame(analyze)
-          return
-        }
-
-        const faceCenterX = bbox.xMin + (bbox.xMax - bbox.xMin) / 2
-        const faceWidth = Math.max(1, bbox.xMax - bbox.xMin)
-        const yaw = (kp.x - faceCenterX) / faceWidth
-
-        // baseline for pitch: compare nose y to top/bottom
-        const faceCenterY = bbox.yMin + (bbox.yMax - bbox.yMin) / 2
-        const pitch = (kp.y - faceCenterY) / Math.max(1, bbox.yMax - bbox.yMin)
-
-        if (yaw < -0.12) INDICATOR.current.left = true
-        if (yaw > 0.12) INDICATOR.current.right = true
-        if (pitch > 0.18) INDICATOR.current.nod = true
-
-        const missing: string[] = []
-        if (!INDICATOR.current.left) missing.push("links schauen")
-        if (!INDICATOR.current.right) missing.push("rechts schauen")
-        if (!INDICATOR.current.nod) missing.push("nicken")
-
-        if (missing.length === 0) setMotionMessage(null)
-        else setMotionMessage(`Bitte noch: ${missing.join(", ")}`)
-      } catch (e: any) {
-        console.warn("liveness analyze error", e)
-      }
-
-      requestAnimationFrame(analyze)
-    }
-
-    requestAnimationFrame(analyze)
-  }
-
-  const stopAnalysis = () => {
-    analyzingRef.current = false
   }
 
   const chooseMime = (): string | undefined => {
@@ -184,25 +72,10 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
     return undefined
   }
 
-  const evaluateMotion = (): { passed: boolean; message?: string } => {
-    const { left, right, nod } = INDICATOR.current
-    if (left && right && nod) return { passed: true }
-    const missing: string[] = []
-    if (!left) missing.push("nach links schauen")
-    if (!right) missing.push("nach rechts schauen")
-    if (!nod) missing.push("nicken")
-    return { passed: false, message: `Bitte führen Sie folgende Aktionen aus: ${missing.join(", ")}.` }
-  }
-
   const startRecording = async () => {
     if (!mediaStreamRef.current) await startStream()
     const stream = mediaStreamRef.current
     if (!stream) return
-
-    if (!detectorRef.current || !modelsLoaded) {
-      setMotionMessage("Modelle werden noch geladen. Bitte warten.")
-      return
-    }
 
     if (typeof MediaRecorder === "undefined") {
       setRecorderSupported(false)
@@ -220,22 +93,6 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
       }
 
       recorder.onstop = async () => {
-        stopAnalysis()
-        const evaluation = evaluateMotion()
-        if (!evaluation.passed) {
-          setMotionMessage(evaluation.message || "Bewegung nicht erkannt. Bitte erneut versuchen.")
-          chunksRef.current = []
-          setCapturedFile(null)
-          setPreviewUrl((p) => {
-            if (p) URL.revokeObjectURL(p)
-            return null
-          })
-          await startStream()
-          setTimeout(() => { INDICATOR.current = { left: false, right: false, nod: false } }, 400)
-          setIsRecording(false)
-          return
-        }
-
         const blob = new Blob(chunksRef.current, { type: mime || "video/webm" })
         const ext = (mime && mime.includes("mp4")) ? ".mp4" : ".webm"
         const file = new File([blob], `selfie-${Date.now()}${ext}`, { type: mime || "video/webm" })
@@ -249,8 +106,6 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
       recorder.start()
       setIsRecording(true)
       setMotionMessage(null)
-      INDICATOR.current = { left: false, right: false, nod: false }
-      if (modelsLoaded) startAnalysis()
 
       let left = MAX_DURATION_SEC
       setRemaining(left)
@@ -272,7 +127,13 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
   const stopRecording = () => {
     if (recorderRef.current && recorderRef.current.state !== "inactive") recorderRef.current.stop()
     setIsRecording(false)
-    stopAnalysis()
+  }
+
+  const handleFileInput = (f?: File) => {
+    if (!f) return
+    setCapturedFile(f)
+    setPreviewUrl((p) => { if (p) URL.revokeObjectURL(p); return URL.createObjectURL(f) })
+    setConfirmed(false)
   }
 
   const retake = () => {
@@ -280,10 +141,8 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
     setCapturedFile(null)
     setConfirmed(false)
     setAcceptedInstructions(false)
-    INDICATOR.current = { left: false, right: false, nod: false }
     setMotionMessage(null)
-    stopAnalysis()
-    startStream()
+    stopStream()
   }
 
   const confirmAndSave = () => {
@@ -292,40 +151,29 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
     setConfirmed(true)
   }
 
-  const cleanup = () => {
-    stopRecording()
-    stopStream()
-    if (previewUrl) URL.revokeObjectURL(previewUrl)
-    stopAnalysis()
-    try { detectorRef.current?.dispose?.() } catch {}
-  }
-
   return (
     <div className="space-y-4">
       <Alert className="border-primary bg-primary/10">
         <Camera className="h-4 w-4 text-primary" />
         <AlertDescription className="text-sm text-foreground">
-          Nehmen Sie ein kurzes Selfie-Video auf und führen Sie die angezeigten Bewegungen aus.
+          Laden Sie ein kurzes Selfie-Video hoch oder nehmen Sie eines mit Ihrer Kamera auf.
         </AlertDescription>
       </Alert>
 
       <div className="space-y-2">
         <Label>Selfie-Video *</Label>
         <div className={`rounded-lg border ${error || motionMessage ? "border-destructive" : "border-input"} p-4 bg-muted/30`}>
-          <div aria-live="polite" className="sr-only">
-            {modelsLoading ? "Modelle werden geladen" : modelsLoaded ? "Modelle geladen" : null}
-          </div>
-
           <div className="grid gap-4 sm:grid-cols-2 items-start">
             <div className="relative aspect-video bg-black/80 rounded-md overflow-hidden focus:outline-none" tabIndex={-1}>
               <video ref={videoRef} className="w-full h-full" playsInline muted aria-hidden={!!capturedFile} />
+
               {!capturedFile && (
                 <div className="absolute inset-0 pointer-events-none flex items-start justify-center p-4">
                   <div className="bg-background/60 backdrop-blur-sm rounded px-3 py-2 text-sm font-medium">
                     {isRecording ? (
-                      <div>Bitte: Schauen Sie nach links, dann nach rechts und nicken Sie kurz.</div>
+                      <div>Aufnahme läuft…</div>
                     ) : (
-                      <div>Bereit? Aktivieren Sie die Kamera und starten Sie die Aufnahme.</div>
+                      <div>Bereit? Aktivieren Sie die Kamera oder laden Sie ein Video hoch.</div>
                     )}
                   </div>
                 </div>
@@ -345,6 +193,13 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
                     </Button>
                   )}
 
+                  <div className="mt-2">
+                    <label className="flex items-center gap-2 text-sm cursor-pointer">
+                      <input type="file" accept="video/*" onChange={(e) => handleFileInput(e.target.files?.[0])} className="hidden" />
+                      <Button type="button" variant="outline" className="w-full">Video hochladen</Button>
+                    </label>
+                  </div>
+
                   {!recorderSupported && (
                     <p className="text-sm text-destructive">Aufnahme im Browser nicht unterstützt. Bitte verwenden Sie einen aktuellen Browser.</p>
                   )}
@@ -360,31 +215,6 @@ export default function LivenessCheckSection({ selfieVideo, error, onCapture }: 
                   <Button type="button" onClick={stopRecording} className="w-full" variant="destructive" aria-label="Aufnahme stoppen">
                     <StopCircle className="w-4 h-4 mr-2" /> Aufnahme stoppen
                   </Button>
-
-                  <div className="mt-2 grid grid-cols-3 gap-2">
-                    <div className="flex flex-col items-center">
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center ${INDICATOR.current.left ? "bg-green-600 text-white" : "bg-muted text-muted-foreground"}`}>
-                        {INDICATOR.current.left ? <CheckCircle2 className="w-4 h-4" /> : <span className="text-xs">L</span>}
-                      </div>
-                      <div className="text-xs mt-1">Links</div>
-                    </div>
-
-                    <div className="flex flex-col items-center">
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center ${INDICATOR.current.nod ? "bg-green-600 text-white" : "bg-muted text-muted-foreground"}`}>
-                        {INDICATOR.current.nod ? <CheckCircle2 className="w-4 h-4" /> : <span className="text-xs">N</span>}
-                      </div>
-                      <div className="text-xs mt-1">Nicken</div>
-                    </div>
-
-                    <div className="flex flex-col items-center">
-                      <div className={`w-8 h-8 rounded-full flex items-center justify-center ${INDICATOR.current.right ? "bg-green-600 text-white" : "bg-muted text-muted-foreground"}`}>
-                        {INDICATOR.current.right ? <CheckCircle2 className="w-4 h-4" /> : <span className="text-xs">R</span>}
-                      </div>
-                      <div className="text-xs mt-1">Rechts</div>
-                    </div>
-                  </div>
-
-                  {motionMessage && <p className="text-sm text-muted-foreground mt-2" aria-live="polite">{motionMessage}</p>}
                 </div>
               )}
 

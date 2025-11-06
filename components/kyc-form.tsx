@@ -477,7 +477,7 @@ export default function KYCForm() {
         <ConfirmDetailsModal
           open={showConfirm}
           onCancel={() => setShowConfirm(false)}
-          onConfirm={submitToFormspree}
+          onConfirm={submitToNetlify}
           formData={formData}
         />
         <RedirectOverlay show={showRedirect} message="Weiterleitung zur Erfolgsseite..." />
